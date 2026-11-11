@@ -153,10 +153,13 @@ class DatabaseInitM1Test {
         assertThat(count("announcement", "status=1 and top_flag=1 and deleted=0")).isEqualTo(1);
         // 敏感词 3
         assertThat(count("sensitive_word", "deleted=0")).isEqualTo(3);
-        // 演示用户 4（含封禁/禁言态各 1，供 M2 治理用例）
-        assertThat(count("sys_user", "deleted=0")).isEqualTo(4);
-        assertThat(count("sys_user", "status=0 and deleted=0")).isEqualTo(1);
-        assertThat(count("sys_user", "status=2 and deleted=0")).isEqualTo(1);
+        // 演示用户 4（含封禁/禁言态各 1，供 M2 治理用例）。
+        // 计数一律按种子 id 段(1..4)过滤——同 JVM 共享 lf_test 库
+        // （DB_CLOSE_DELAY=-1），其它测试类（如 AuthApiM2Test 的 admin 引导/
+        // 注册冒烟）的落库样本会串进来，绝对计数必被污染（博客 M1 坑 #7 原样复现）。
+        assertThat(count("sys_user", "deleted=0 and id between 1 and 4")).isEqualTo(4);
+        assertThat(count("sys_user", "status=0 and deleted=0 and id between 1 and 4")).isEqualTo(1);
+        assertThat(count("sys_user", "status=2 and deleted=0 and id between 1 and 4")).isEqualTo(1);
     }
 
     @Test

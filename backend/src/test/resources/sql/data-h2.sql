@@ -2,7 +2,7 @@
 -- 校园失物招领系统 · H2 测试种子（与生产 data.sql 逐行对齐）（幂等：全部 INSERT IGNORE，可重复执行）
 -- 约定：
 --   1) 显式 id，测试 data-h2.sql 与本文件逐行对齐；
---   2) 种子演示账号口令散列为 BCrypt("password") 预计算值（仅演示/测试语义，
+--   2) 种子演示账号口令散列为 BCrypt("password123") 预计算值（测试常量 SEED_PWD 配对）（仅演示/测试语义，
 --      admin 真实口令由 M2 AdminBootstrapRunner 按 LF_ADMIN_PASSWORD 首启创建，
 --      不经此种子——避免仓库里出现可登录生产的管理员凭据）；
 --   3) 安全红线：任何真实密钥/口令形态字面量不得出现在本仓库。
