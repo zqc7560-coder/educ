@@ -64,6 +64,9 @@ public class SecurityConfig {
      * 白名单与模块进度同步追加，是"忘记登记=401"纪律的反向保险。
      */
     private static final String[] PUBLIC_GETS = {
+            // 物品域只读公开（写操作与 mine=1 在 Controller 显式拦匿名——博客 M3 同款）
+            "/api/items",
+            "/api/items/*",
             "/api/announcements",
             "/api/announcements/active",
             "/api/announcements/*",
