@@ -67,6 +67,10 @@ public class SecurityConfig {
             // 物品域只读公开（写操作与 mine=1 在 Controller 显式拦匿名——博客 M3 同款）
             "/api/items",
             "/api/items/*",
+            // 论坛读口公开（游客可逛帖；写口全部 authenticated）
+            "/api/forum/posts",
+            "/api/forum/posts/*",
+            "/api/forum/posts/*/replies",
             "/api/announcements",
             "/api/announcements/active",
             "/api/announcements/*",

@@ -72,6 +72,10 @@ public enum BizCode {
     BOARD_NOT_FOUND(5003, "板块不存在"),
     POST_NOT_OWNER(5004, "无权操作他人帖子"),
     REPORT_DUPLICATE(5005, "您已举报过该内容"),
+    /** 两级封顶：给二级回复再挂回复被拒（前端应归一到一级） */
+    REPLY_LEVEL_EXCEEDED(5006, "回复最多两级，请直接回复该楼的一级评论"),
+    REPLY_TOO_FAST(5007, "回复太快了，请 10 秒后再试"),
+    POST_STATUS_INVALID(5008, "帖子当前状态不允许该操作"),
 
     // ---------- 公告（60xx） ----------
     ANNOUNCEMENT_NOT_FOUND(6001, "公告不存在"),
