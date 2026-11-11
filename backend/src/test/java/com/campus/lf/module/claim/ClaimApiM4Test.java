@@ -87,7 +87,8 @@ class ClaimApiM4Test {
     }
 
     private JsonNode envelope(MvcResult r) throws Exception {
-        return om.readTree(r.getResponse().getContentAsString());
+        return om.readTree(new String(r.getResponse().getContentAsByteArray(),
+                java.nio.charset.StandardCharsets.UTF_8));  // M3 教训：无参版按 ISO-8859-1
     }
 
     private String registerFresh() throws Exception {

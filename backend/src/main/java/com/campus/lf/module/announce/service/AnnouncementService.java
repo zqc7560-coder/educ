@@ -56,6 +56,7 @@ public class AnnouncementService {
             STATUS_OFFLINE, Set.of(STATUS_PUBLISHED));
 
     private final AnnouncementMapper annMapper;
+    private final com.campus.lf.module.admin.service.OperationLogService opLog;
     private final AnnouncementImageMapper imgMapper;
     private final SysConfigMapper configMapper;
 
@@ -124,6 +125,10 @@ public class AnnouncementService {
         patch.setId(id);
         patch.setStatus(target);
         annMapper.updateById(patch);
+        opLog.record(me.getUserId(),
+                target == STATUS_PUBLISHED ? com.campus.lf.module.admin.service.OperationLogService.ANNOUNCE_PUBLISH
+                        : com.campus.lf.module.admin.service.OperationLogService.ANNOUNCE_OFFLINE,
+                "announce:" + id, a.getTitle());
         log.info("公告 {} 状态 {}→{} by {}", id, a.getStatus(), target, me.getUserId());
     }
 

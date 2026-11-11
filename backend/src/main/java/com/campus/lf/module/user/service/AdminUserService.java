@@ -52,6 +52,7 @@ public class AdminUserService {
     private final AuthService authService;
     private final TokenBlacklistService blacklistService;
     private final JwtProperties jwtProperties;
+    private final com.campus.lf.module.admin.service.OperationLogService opLog;
 
     /**
      * 用户分页（?keyword&status&pageNum&pageSize）。
@@ -102,6 +103,11 @@ public class AdminUserService {
             blacklistService.invalidateAllTokens(targetUserId, jwtProperties.getExpireSeconds());
             log.info("管理员 {} 封禁用户 {}，其全部登录令牌已作废", operatorId, targetUserId);
         }
+        opLog.record(operatorId, switch (status) {
+            case UserStatus.BANNED -> com.campus.lf.module.admin.service.OperationLogService.USER_BAN;
+            case UserStatus.MUTED -> com.campus.lf.module.admin.service.OperationLogService.USER_MUTE;
+            default -> com.campus.lf.module.admin.service.OperationLogService.USER_UNBAN;
+        }, "user:" + targetUserId, "status " + target.getStatus() + "→" + status);
     }
 
     /**
@@ -135,6 +141,8 @@ public class AdminUserService {
         // 角色集写进令牌声明：变更后旧令牌的权限视图是"改前快照"——抬水位强制重登，
         // 宁可踢用户下线，也不放"权限漂移"的令牌过关
         blacklistService.invalidateAllTokens(targetUserId, jwtProperties.getExpireSeconds());
+        opLog.record(operatorId, com.campus.lf.module.admin.service.OperationLogService.USER_ROLES,
+                "user:" + targetUserId, "roleIds=" + roleIds);
     }
 
     private SysUser requireUser(Long userId) {

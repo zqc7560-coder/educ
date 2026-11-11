@@ -72,7 +72,8 @@ class ForumApiM5Test {
     // ====================== 工具 ======================
 
     private JsonNode envelope(MvcResult r) throws Exception {
-        return om.readTree(r.getResponse().getContentAsString());
+        return om.readTree(new String(r.getResponse().getContentAsByteArray(),
+                java.nio.charset.StandardCharsets.UTF_8));  // M3 教训：无参版按 ISO-8859-1
     }
 
     private String login(String studentNo, String pwd) throws Exception {
@@ -267,7 +268,7 @@ class ForumApiM5Test {
                 .andExpect(jsonPath("$.data[0].children.length()").value(1))
                 .andExpect(jsonPath("$.data[0].children[0].content").value("感谢！"))
                 .andExpect(jsonPath("$.data[0].children[0].replyToNickname").value("李同学"));
-        // 回复计数：两条都是待审（forum_audit=1）——reply_count 只在已发布路径+1 的口径核对
+        // 计数不变式：reply_count=本帖未删回复数（提交即+1，不分审核状态）
         assertThat(postMapper.selectById(postId).getReplyCount()).isEqualTo(2);
     }
 
