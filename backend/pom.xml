@@ -1,0 +1,237 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!--
+  校园失物招领系统 · 后端工程 POM（M0 工程骨架）
+  ============================================================
+  设计依据：《开发方案.md》§2 技术选型 —— Spring Boot 3.2 + MyBatis-Plus + Redis。
+  说明：
+  1. 编译目标 Java 17（与设计文档选型一致），本机 JDK 21 向下兼容编译。
+  2. MyBatis-Plus 使用 spring-boot3 专用 starter（3.5.x），包名 jakarta 与 Boot3 匹配。
+  3. 测试数据源用 H2 内存库（MySQL 兼容模式），见 src/test/resources/application-test.yml，
+     单测不依赖本机 MySQL 账号口令（进度台账环境约束）。
+  4. 与博客毕设基座的差异：无 AI/jsoup 依赖；jjwt/security 从 M2 起使用；
+     JaCoCo exec 重定向 E:/develop/jacoco-educ/（Windows 中文路径静默坑，博客 M11 实测）。
+-->
+<project xmlns="http://maven.apache.org/POM/4.0.0"
+         xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+         xsi:schemaLocation="http://maven.apache.org/POM/4.0.0 https://maven.apache.org/xsd/maven-4.0.0.xsd">
+  <modelVersion>4.0.0</modelVersion>
+
+  <parent>
+    <groupId>org.springframework.boot</groupId>
+    <artifactId>spring-boot-starter-parent</artifactId>
+    <version>3.2.5</version>
+    <relativePath/>
+  </parent>
+
+  <groupId>com.campus.lf</groupId>
+  <artifactId>lf-server</artifactId>
+  <version>0.1.0</version>
+  <name>lf-server</name>
+  <description>校园失物招领系统后端（毕业设计）</description>
+
+  <properties>
+    <java.version>17</java.version>
+    <project.build.sourceEncoding>UTF-8</project.build.sourceEncoding>
+    <mybatis-plus.version>3.5.5</mybatis-plus.version>
+    <knife4j.version>4.5.0</knife4j.version>
+    <jjwt.version>0.12.5</jjwt.version>
+    <!--
+      JaCoCo 落盘路径的坑（博客毕设 M11/M12 实测固化，本项目沿用）：
+      destFile/dataFile 都给 target 默认值——Linux（CI）直接用；
+      Windows 由下方 coverage-ascii-exec profile 覆盖为纯 ASCII 的 E 盘路径。
+      jacoco:check 的 dataFile 参数不认插件属性名，profile 未激活时若不定义
+      属性会传未解析字面量导致静默跳过（假绿），所以必须在这里给默认。
+    -->
+    <jacoco.destFile>${project.build.directory}/jacoco.exec</jacoco.destFile>
+    <jacoco.dataFile>${project.build.directory}/jacoco.exec</jacoco.dataFile>
+  </properties>
+
+  <dependencies>
+    <!-- Web：REST 控制器、内嵌 Tomcat、Jackson -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-web</artifactId>
+    </dependency>
+
+    <!-- Validation：@Valid 注解校验，配合全局异常处理器返回 400 明细 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-validation</artifactId>
+    </dependency>
+
+    <!-- 数据访问：MyBatis-Plus（分页/逻辑删除/乐观锁插件） -->
+    <dependency>
+      <groupId>com.baomidou</groupId>
+      <artifactId>mybatis-plus-spring-boot3-starter</artifactId>
+      <version>${mybatis-plus.version}</version>
+    </dependency>
+
+    <!-- MySQL 驱动：仅运行时；测试切 H2 -->
+    <dependency>
+      <groupId>com.mysql</groupId>
+      <artifactId>mysql-connector-j</artifactId>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- Redis：缓存 / 计数 / Token 黑名单 -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-data-redis</artifactId>
+    </dependency>
+
+    <!-- Spring Security：BCrypt + 过滤器链 + @PreAuthorize（M2 启用） -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-security</artifactId>
+    </dependency>
+
+    <!-- JWT（M2）：jjwt 0.12 新 API -->
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-api</artifactId>
+      <version>${jjwt.version}</version>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-impl</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+    <dependency>
+      <groupId>io.jsonwebtoken</groupId>
+      <artifactId>jjwt-jackson</artifactId>
+      <version>${jjwt.version}</version>
+      <scope>runtime</scope>
+    </dependency>
+
+    <!-- jsoup：帖子/描述纯文本清洗（XSS 服务端第一道闸） -->
+    <dependency>
+      <groupId>org.jsoup</groupId>
+      <artifactId>jsoup</artifactId>
+      <version>1.17.2</version>
+    </dependency>
+
+    <!-- Lombok -->
+    <dependency>
+      <groupId>org.projectlombok</groupId>
+      <artifactId>lombok</artifactId>
+      <optional>true</optional>
+    </dependency>
+
+    <!-- Knife4j 在线接口文档；prod 关闭 -->
+    <dependency>
+      <groupId>com.github.xiaoymin</groupId>
+      <artifactId>knife4j-openapi3-jakarta-spring-boot-starter</artifactId>
+      <version>${knife4j.version}</version>
+    </dependency>
+
+    <!-- ==================== 测试依赖 ==================== -->
+    <dependency>
+      <groupId>org.springframework.boot</groupId>
+      <artifactId>spring-boot-starter-test</artifactId>
+      <scope>test</scope>
+    </dependency>
+    <dependency>
+      <groupId>com.h2database</groupId>
+      <artifactId>h2</artifactId>
+      <scope>test</scope>
+    </dependency>
+  </dependencies>
+
+  <build>
+    <finalName>lf-server</finalName>
+    <plugins>
+      <!-- JaCoCo：mvn test 自动出报告；门槛由 -Pcoverage-gate 显式触发（见 profiles） -->
+      <plugin>
+        <groupId>org.jacoco</groupId>
+        <artifactId>jacoco-maven-plugin</artifactId>
+        <version>0.8.12</version>
+        <executions>
+          <execution>
+            <id>prepare-agent</id>
+            <goals><goal>prepare-agent</goal></goals>
+          </execution>
+          <execution>
+            <id>report</id>
+            <phase>test</phase>
+            <goals><goal>report</goal></goals>
+          </execution>
+        </executions>
+      </plugin>
+      <plugin>
+        <groupId>org.springframework.boot</groupId>
+        <artifactId>spring-boot-maven-plugin</artifactId>
+        <configuration>
+          <excludes>
+            <exclude>
+              <groupId>org.projectlombok</groupId>
+              <artifactId>lombok</artifactId>
+            </exclude>
+          </excludes>
+        </configuration>
+      </plugin>
+    </plugins>
+  </build>
+
+  <profiles>
+    <!--
+      coverage-ascii-exec：仅 Windows 激活。背景（博客毕设实测坑，本项目环境同坑）：
+      工程路径含中文（D:\项目\毕业设计），JaCoCo destfile 展开后写进 surefire
+      fork JVM 的 -javaagent 参数，Windows 命令行编码往返把路径写坏——exec 永不
+      生成、无任何报错，覆盖率报告静默缺失。解法=Windows 下把 exec 重定向到
+      纯 ASCII 的 E 盘路径（Linux CI 不激活，保持 target 默认）。
+    -->
+    <profile>
+      <id>coverage-ascii-exec</id>
+      <activation>
+        <os><family>Windows</family></os>
+      </activation>
+      <properties>
+        <jacoco.destFile>E:/develop/jacoco-educ/lf-server.exec</jacoco.destFile>
+        <jacoco.dataFile>E:/develop/jacoco-educ/lf-server.exec</jacoco.dataFile>
+      </properties>
+    </profile>
+
+    <!--
+      coverage-gate：覆盖率门槛（-Pcoverage-gate 显式触发，绑定 verify 阶段）。
+      门槛值以《开发计划.md》S7 为准：全工程行覆盖 ≥60%。
+      博客毕设 M12 实锤的接线坑照抄防呆：jacoco:check 不认插件属性 jacoco.dataFile，
+      必须在 execution 的 configuration 里显式传 <dataFile>——否则 Windows 下
+      exec 重定向到 E 盘后 check 读不到文件又静默跳过=本地门禁假绿。三目标三口径：
+      prepare-agent 认 destFile、report 认属性、check 只认 execution 参数。
+    -->
+    <profile>
+      <id>coverage-gate</id>
+      <build>
+        <plugins>
+          <plugin>
+            <groupId>org.jacoco</groupId>
+            <artifactId>jacoco-maven-plugin</artifactId>
+            <executions>
+              <execution>
+                <id>gate</id>
+                <phase>verify</phase>
+                <goals><goal>check</goal></goals>
+                <configuration>
+                  <dataFile>${jacoco.dataFile}</dataFile>
+                  <rules>
+                    <rule>
+                      <element>BUNDLE</element>
+                      <limits>
+                        <limit>
+                          <counter>LINE</counter>
+                          <value>COVEREDRATIO</value>
+                          <minimum>0.60</minimum>
+                        </limit>
+                      </limits>
+                    </rule>
+                  </rules>
+                </configuration>
+              </execution>
+            </executions>
+          </plugin>
+        </plugins>
+      </build>
+    </profile>
+  </profiles>
+</project>

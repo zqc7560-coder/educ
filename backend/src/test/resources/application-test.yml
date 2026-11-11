@@ -1,0 +1,44 @@
+# =====================================================================
+# test profile：单元/接口测试专用 —— 数据源切换 H2 内存库（MySQL 兼容模式）。
+# 环境约束（进度台账）：测试绝不依赖真实 MySQL 账号口令。
+# =====================================================================
+spring:
+  datasource:
+    # MODE=MySQL: 反引号/AUTO_INCREMENT 等 MySQL 方言可用
+    # DATABASE_TO_LOWER: 未加引号标识符统一小写，与 MySQL 行为一致，列名映射不乱
+    # 独立数据库名 lf_test + DB_CLOSE_DELAY=-1：同一 JVM 内多测试类共享数据
+    url: jdbc:h2:mem:lf_test;MODE=MySQL;DATABASE_TO_LOWER=TRUE;CASE_INSENSITIVE_IDENTIFIERS=TRUE;DB_CLOSE_DELAY=-1
+    driver-class-name: org.h2.Driver
+    username: sa
+    password: ""
+  sql:
+    init:
+      mode: always
+      # H2 版 DDL：与 db/mysql/schema.sql 同步维护，剥离 UNSIGNED/FULLTEXT ngram/
+      # ON UPDATE CURRENT_TIMESTAMP 等 H2 不支持项（博客 M1 已验证的剥离清单）
+      schema-locations: classpath:sql/schema-h2.sql
+      data-locations: classpath:sql/data-h2.sql
+  data:
+    redis:
+      # 指向必然无监听的端口，连接探测快速失败（不长时间阻塞），
+      # 由测试里的 @MockBean StringRedisTemplate 接管，零真实网络依赖。
+      host: 127.0.0.1
+      port: 6390
+      database: 1
+      timeout: 200ms
+      connect-timeout: 200ms
+
+# 测试上传落盘指到 target/ 下（target 已在 .gitignore，跑完随 mvn clean 消失，
+# 不污染工作区 uploads/——生产/dev 默认 ./uploads 不变）
+lf:
+  upload:
+    dir: ./target/test-uploads
+  # 定时任务在测试里全部禁自动触发（初始延迟 24h=事实永不跑）：
+  # 调度行为由测试显式调用方法驱动，消除"调度线程与断言赛跑"的假阳性
+  # （博客 M9 PvSyncJob 同款纪律）。
+  claim:
+    remind-initial-delay-ms: 86400000
+    remind-interval-ms: 86400000
+  announcement:
+    expire-initial-delay-ms: 86400000
+    expire-interval-ms: 86400000

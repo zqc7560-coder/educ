@@ -1,0 +1,84 @@
+# =====================================================================
+# 校园失物招领系统后端 · 运行时主配置（dev 直连本机中间件）
+# 设计依据：《开发方案.md》§2 —— dev / docker / prod 三 profile，
+# 本文件是"默认=dev"的公共部分，敏感值一律环境变量占位。
+# 与博客毕设并跑同机：端口 8081、前端 5174、Redis database 1、库 lost_found_db。
+# =====================================================================
+server:
+  port: 8081
+  servlet:
+    context-path: /          # /api 前缀由各 Controller 显式声明
+  tomcat:
+    threads:
+      max: 100               # 容量基线，压测 200 并发下靠队列排队不炸线程
+
+spring:
+  application:
+    name: lf-server
+  profiles:
+    # compose 注入 SPRING_PROFILES_ACTIVE=docker 经 group 级联继承 prod 全部覆盖
+    # （博客 M13 教训：docker profile 悬空=prod 覆盖静默全丢；group 必须写主文档）
+    group:
+      docker: [prod]
+  datasource:
+    # 注意：characterEncoding 要的是 **Java 字符集名**（UTF-8），不是 MySQL 排序字符集名
+    # （博客 M6 真实冒烟抓到的坑：写 utf8mb4 建连即抛 UnsupportedEncodingException）
+    url: ${LF_DB_URL:jdbc:mysql://127.0.0.1:3306/lost_found_db?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8}
+    username: ${LF_DB_USERNAME:root}
+    password: ${LF_DB_PASSWORD:1234}
+    hikari:
+      maximum-pool-size: 10
+      connection-timeout: 3000
+  data:
+    redis:
+      host: ${LF_REDIS_HOST:127.0.0.1}
+      port: ${LF_REDIS_PORT:6379}
+      # 与博客毕设（db 0）共用本机 Redis 实例：按 database 分库互不串扰
+      database: ${LF_REDIS_DB:1}
+      password: ${LF_REDIS_PASSWORD:}
+      timeout: 2s
+  servlet:
+    multipart:
+      max-file-size: 5MB     # 与 4002 错误码的 5MB 限制对齐
+      max-request-size: 6MB  # 略大于 5MB：multipart 信封开销不误杀合法文件
+
+# MyBatis-Plus：下划线→驼峰；逻辑删除语义（@TableLogic 字段）
+mybatis-plus:
+  configuration:
+    map-underscore-to-camel-case: true
+  global-config:
+    banner: false
+    db-config:
+      id-type: auto
+      logic-delete-field: deleted
+      logic-delete-value: 1
+      logic-not-delete-value: 0
+
+springdoc:
+  api-docs:
+    path: /v3/api-docs
+knife4j:
+  enable: true
+
+# 业务自定义配置（JWT 密钥、上传目录等）——M2 起使用，骨架期先占位对齐命名
+lf:
+  jwt:
+    secret: ${LF_JWT_SECRET:dev-only-secret-change-me-0123456789abcdef}  # ≥32B；prod 必须注入
+    expire-seconds: 7200            # 2h 短 TTL（黑名单方案补齐登出）
+  upload:
+    dir: ${LF_UPLOAD_DIR:./uploads} # 本地磁盘映射 /uploads（不接 OSS）
+  admin:
+    # M2 引导管理员初始口令：默认值仅本机课设演示，生产经 LF_ADMIN_PASSWORD 注入
+    init-password: ${LF_ADMIN_PASSWORD:Admin@123}
+  claim:
+    # M4 认领超时提醒节拍：每小时扫一次 72h 未处理认领单
+    remind-initial-delay-ms: 60000
+    remind-interval-ms: 3600000
+  announcement:
+    # M6 公告生效时间窗自动下架：每小时一轮
+    expire-initial-delay-ms: 90000
+    expire-interval-ms: 3600000
+
+logging:
+  level:
+    com.campus.lf: info

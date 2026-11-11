@@ -1,0 +1,23 @@
+# ===== 构建产物 =====
+backend/target/
+frontend/dist/
+frontend/node_modules/
+
+# ===== 运行期数据（绝不入库） =====
+backend/.env
+backend/.env.local
+backend/uploads/
+backend/logs/
+deploy/.env
+deploy/logs/
+
+# ===== IDE/系统 =====
+.idea/
+.vscode/
+*.iml
+.DS_Store
+Thumbs.db
+
+# ===== 测试 =====
+__pycache__/
+*.pyc

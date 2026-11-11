@@ -1,0 +1,13 @@
+# =====================================================================
+# docker profile：容器部署（compose 内 SPRING_PROFILES_ACTIVE=docker）的
+# 运行时配置差异项。经主文档 spring.profiles.group docker:[prod] 级联
+# 继承 prod 全部覆盖，本文件只承载容器相对裸机 prod 的微调
+# （group 声明必须在主文档——博客 M13 实测：写 profile 专属文档启动即抛）。
+# =====================================================================
+
+# 容器侧唯一有意的微调：日志级别钉死演示口径（值与 prod 相同，
+# 将来改 prod 降噪不会意外波及答辩演示机，排障依赖挂载卷里的 info 轨迹）
+logging:
+  level:
+    root: warn
+    com.campus.lf: info

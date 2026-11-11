@@ -1,0 +1,27 @@
+# =====================================================================
+# prod profile：裸机生产/演示长跑口径 —— 全部外部地址经环境变量注入，
+# knife4j 关闭、日志降噪。容器部署经 group docker:[prod] 继承本文件。
+# =====================================================================
+spring:
+  datasource:
+    url: ${LF_DB_URL:jdbc:mysql://mysql:3306/lost_found_db?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8}
+    username: ${LF_DB_USERNAME:root}
+    password: ${LF_DB_PASSWORD:}
+  data:
+    redis:
+      host: ${LF_REDIS_HOST:redis}
+      port: ${LF_REDIS_PORT:6379}
+      password: ${LF_REDIS_PASSWORD:}
+
+knife4j:
+  enable: false
+springdoc:
+  api-docs:
+    enabled: false
+
+logging:
+  level:
+    root: warn
+    com.campus.lf: info
+  file:
+    name: ${LF_LOG_FILE:./logs/lf-server.log}
