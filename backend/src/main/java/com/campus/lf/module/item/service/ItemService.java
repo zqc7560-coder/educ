@@ -84,6 +84,9 @@ public class ItemService {
     private final SysUserMapper userMapper;
     private final SysConfigMapper configMapper;
     private final SensitiveWordGate wordGate;
+    // M7 旁路：匹配推荐+站内消息都是"尽力而为"的增强，push/notify 内部吞异常
+    private final com.campus.lf.module.notice.service.MatchService matchService;
+    private final com.campus.lf.module.notice.service.NotificationService notificationService;
 
     // ==================================================================
     // 检索
@@ -213,6 +216,9 @@ public class ItemService {
         itemMapper.insert(item);
 
         rebuildImages(item.getId(), dto.getImageUrls());
+        if (requested == STATUS_PUBLISHED) {
+            matchService.matchAndNotify(item);   // 直发件：入库即可见，立刻找对端
+        }
         log.info("用户 {} 发布物品 id={} type={} status={}", me.getUserId(),
                 item.getId(), type, requested);
         return Map.of("id", item.getId(), "status", requested);
@@ -278,6 +284,24 @@ public class ItemService {
             patch.setPublishedAt(LocalDateTime.now());
         }
         itemMapper.updateById(patch);
+        // 进入发布态的每一跳都跑一次匹配（审核通过/重上架同通道；幂等=重复推送可接受，
+        // 匹配本身按当前在架集合算，没有"已推送"标记表的复杂度）
+        if (target == STATUS_PUBLISHED) {
+            LostItem fresh = itemMapper.selectById(id);
+            matchService.matchAndNotify(fresh);
+            if (item.getStatus() == STATUS_PENDING) {
+                // 待审→发布 = 审核通过：作者收结果通知（重上架 2→1 不重发）
+                notificationService.push(item.getUserId(),
+                        com.campus.lf.module.notice.NotifyType.ITEM_AUDIT, id,
+                        "物品审核通过", "《" + item.getTitle() + "》已发布，可在大厅被检索到。");
+            }
+        } else if (target == STATUS_OFFLINE && !item.getUserId().equals(me.getUserId())) {
+            // 治理下架：作者必须收到理由（自助下架自己操作无需通知）
+            notificationService.push(item.getUserId(),
+                    com.campus.lf.module.notice.NotifyType.ITEM_AUDIT, id,
+                    item.getStatus() == STATUS_PENDING ? "物品审核未通过" : "物品被下架",
+                    "《" + item.getTitle() + "》" + (item.getStatus() == STATUS_PENDING ? "审核驳回：" : "已被管理员下架：") + reason);
+        }
         log.info("状态流转 id={} {}→{} by uid={} reason={}", id, item.getStatus(), target,
                 me.getUserId(), reason);
     }
