@@ -76,6 +76,26 @@ public class ItemController {
         return Result.ok(itemService.detail(id, me));
     }
 
+    /**
+     * GET /api/items/mine（登录）：我的发布全状态视图。
+     * 精确段 /mine 在 Spring MVC 模式比较里优先于模板 /{id}（静态段胜出），
+     * 但前端 M10 首测时曾撞出 500——那正是 /{id} 抢先把 "mine" 当 Long 转炸的
+     * 教训：此路由缺失时 /{id} 会兜住它。补登记后必须钉一条集成断言（M10 测试）。
+     */
+    @Operation(summary = "我的发布（全状态对自己透明）")
+    @GetMapping("/mine")
+    public Result<PageResult<ItemVO>> mine(@AuthenticationPrincipal LoginUser me,
+                                           @RequestParam(required = false) Integer status,
+                                           @RequestParam(defaultValue = "1") long pageNum,
+                                           @RequestParam(defaultValue = "10") long pageSize) {
+        // GET /api/items/* 在公开白名单里（游客可逛详情），mine 段必须自拦匿名——
+        // 否则 me=null 进 service 直接 NPE（白名单前缀通配的固有代价，同 page 口 mine=1 分支）
+        if (me == null) {
+            return Result.fail(com.campus.lf.common.BizCode.UNAUTHORIZED);
+        }
+        return Result.ok(itemService.pageMine(me, status, pageNum, pageSize));
+    }
+
     /** POST /api/items（登录）：发布；FOUND 必带核验问题；审核开关定初始态 */
     @Operation(summary = "发布（LOST/FOUND）")
     @PostMapping
@@ -110,6 +130,33 @@ public class ItemController {
     @DeleteMapping("/{id}")
     public Result<Void> delete(@AuthenticationPrincipal LoginUser me, @PathVariable Long id) {
         itemService.delete(me, id);
+        return Result.ok();
+    }
+
+    // ---------- 回收站（M10 管理员治理通道；/trash 精确段必须先于 /{id} 模板注册 ----
+    // Spring MVC 的匹配是"精确优先"而非书写顺序，但历史 Spring 版本有顺序敏感性，
+    // 显式把精确路径放前面是跨版本稳态写法） ----------
+
+    @Operation(summary = "回收站分页（item:audit）")
+    @GetMapping("/trash")
+    public Result<PageResult<ItemVO>> trash(@AuthenticationPrincipal LoginUser me,
+                                            @RequestParam(required = false) String keyword,
+                                            @RequestParam(defaultValue = "1") long pageNum,
+                                            @RequestParam(defaultValue = "10") long pageSize) {
+        return Result.ok(itemService.pageTrash(me, keyword, pageNum, pageSize));
+    }
+
+    @Operation(summary = "复活（状态保持删除前原值，幂等护栏）")
+    @PostMapping("/{id}/restore")
+    public Result<Void> restore(@AuthenticationPrincipal LoginUser me, @PathVariable Long id) {
+        itemService.restore(me, id);
+        return Result.ok();
+    }
+
+    @Operation(summary = "彻底删除（物理删行，仅对回收站内物品生效）")
+    @DeleteMapping("/{id}/purge")
+    public Result<Void> purge(@AuthenticationPrincipal LoginUser me, @PathVariable Long id) {
+        itemService.purge(me, id);
         return Result.ok();
     }
 }

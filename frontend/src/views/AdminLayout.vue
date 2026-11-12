@@ -1,32 +1,65 @@
 <script setup>
 /**
- * 后台布局 —— M8/M10 落地的布局壳（骨架占位）。
- * 侧边菜单按权限点渲染。本文件 M0 先提供最小壳（router-view/占位文案），
- * 实体在对应模块完成时替换，路由地址自 M0 起保持稳定。
+ * 管理后台外壳（M10）：侧栏按权限点渲染（13 个权限点里后台相关的 8 个），
+ * 路由级 roles 守卫在 router，这里做菜单级 perms 显隐——"这是管理员用的"
+ * 入口对普通用户不可见（产品口径），后端每个口还有 perms 硬闸。
  */
-</script>
+import { computed } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { logout as logoutApi } from '@/api/auth'
+import { useUserStore } from '@/stores/user'
 
-<template>
-  <div class="placeholder">
-    <h2>后台布局</h2>
-    <p>侧边菜单按权限点渲染</p>
-    <p class="tag">（M8/M10 落地，骨架占位）</p>
-    <router-view v-if="hasChild" />
-  </div>
-</template>
+const route = useRoute()
+const router = useRouter()
+const store = useUserStore()
 
-<script>
-export default {
-  computed: {
-    // SiteLayout 无 children 时 router-view 渲染自身会递归，用路由表判断
-    hasChild() {
-      return this.$route.matched.some((r) => r.children && r.children.length)
-    }
-  }
+const MENUS = [
+  { path: '/admin', label: '数据看板', exact: true },
+  { path: '/admin/audit', label: '审核队列' },
+  { path: '/admin/arbitration', label: '认领仲裁', perm: 'claim:arbitrate' },
+  { path: '/admin/announcements', label: '公告管理', perm: 'announce:manage' },
+  { path: '/admin/users', label: '用户治理', perm: 'user:manage' },
+  { path: '/admin/words', label: '敏感词库', perm: 'word:manage' },
+  { path: '/admin/configs', label: '系统参数', perm: 'config:manage' },
+  { path: '/admin/trash', label: '回收站', perm: 'item:audit' },
+  { path: '/admin/oplogs', label: '操作日志', perm: 'oplog:view' }
+]
+const menus = computed(() => MENUS.filter((m) => !m.perm || (store.perms || []).includes(m.perm)))
+const on = (m) => (m.exact ? route.path === m.path : route.path === m.path)
+
+async function logout() {
+  try { await logoutApi() } catch { /* 令牌可能已失效 */ }
+  store.logout()
+  ElMessage.success('已退出登录')
+  router.push('/login')
 }
 </script>
 
+<template>
+  <div class="shell">
+    <aside class="side">
+      <div class="brand">失物招领 · 管理台</div>
+      <router-link v-for="m in menus" :key="m.path" :to="m.path" :class="['menu', { on: on(m) }]">
+        {{ m.label }}
+      </router-link>
+      <div class="foot">
+        <router-link to="/" class="back">← 回到前台</router-link>
+        <el-button link size="small" @click="logout">退出</el-button>
+      </div>
+    </aside>
+    <main class="body"><router-view /></main>
+  </div>
+</template>
+
 <style scoped>
-.placeholder { padding: 40px; text-align: center; color: #606266; }
-.tag { color: #909399; font-size: 13px; }
+.shell { min-height: 100vh; display: flex; background: #f5f7fa; }
+.side { width: 200px; background: #001529; display: flex; flex-direction: column; padding: 14px 8px; position: sticky; top: 0; height: 100vh; }
+.brand { color: #fff; font-weight: 700; font-size: 15px; padding: 6px 12px 16px; }
+.menu { display: block; padding: 10px 14px; border-radius: 6px; color: #a6b3c4; text-decoration: none; font-size: 14px; margin-bottom: 2px; }
+.menu:hover { background: rgba(255, 255, 255, .08); color: #fff; }
+.menu.on { background: #409eff; color: #fff; }
+.foot { margin-top: auto; display: flex; flex-direction: column; gap: 8px; padding: 10px 12px; }
+.back { color: #a6b3c4; text-decoration: none; font-size: 13px; }
+.body { flex: 1; min-width: 0; padding: 20px 24px; }
 </style>

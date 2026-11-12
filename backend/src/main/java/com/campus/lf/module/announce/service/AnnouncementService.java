@@ -107,9 +107,13 @@ public class AnnouncementService {
         if (annMapper.updateById(patch) == 0) {
             throw new BizException(BizCode.VERSION_CONFLICT);
         }
-        imgMapper.delete(new LambdaQueryWrapper<AnnouncementImage>()
-                .eq(AnnouncementImage::getAnnouncementId, id));
-        saveImages(id, dto.getImageUrls());
+        // 图片"传了才整包替换"：null=本次编辑不动图（前端表单没这个字段时不该
+        // 静默清空已挂图——契约缺陷修复，与论坛编辑 imageUrls 可空的口径一致）
+        if (dto.getImageUrls() != null) {
+            imgMapper.delete(new LambdaQueryWrapper<AnnouncementImage>()
+                    .eq(AnnouncementImage::getAnnouncementId, id));
+            saveImages(id, dto.getImageUrls());
+        }
     }
 
     /** 状态迁移（publish/offline 动作口） */

@@ -1,32 +1,100 @@
 <script setup>
 /**
- * 前台布局 —— M10 落地的布局壳（骨架占位）。
- * 全站顶栏+页脚。本文件 M0 先提供最小壳（router-view/占位文案），
- * 实体在对应模块完成时替换，路由地址自 M0 起保持稳定。
+ * 全站公开顶栏（M10 实体版）——首页/详情/论坛/公告/用户中心共享的导航壳。
+ * 只读 userStore（Pinia 单一事实源），登录态与未读红点都从 store/接口取，
+ * 不各自碰 localStorage（守卫查存储、组件查 store 两套状态漂移的老坑）。
  */
+import { ref, computed, onMounted } from 'vue'
+import { useRoute, useRouter } from 'vue-router'
+import { ElMessage } from 'element-plus'
+import { logout as logoutApi } from '@/api/auth'
+import { activeBanners } from '@/api/common'
+import { useUserStore } from '@/stores/user'
+
+const route = useRoute()
+const router = useRouter()
+const store = useUserStore()
+
+const NAVS = [
+  { path: '/', label: '失物大厅' },
+  { path: '/forum', label: '校园论坛' },
+  { path: '/announcements', label: '公告' }
+]
+const isActive = (path) => (path === '/' ? route.path === '/' : route.path.startsWith(path))
+
+// 首页公告横幅（M6 active 口）：置顶优先最新一条；仅首页展示，失败静默
+const banner = ref(null)
+onMounted(async () => {
+  if (route.path === '/') {
+    try {
+      const list = await activeBanners()
+      banner.value = list && list.length ? list[0] : null
+    } catch { /* 横幅是增强，拉不到不挡首屏 */ }
+  }
+})
+
+async function logout() {
+  try { await logoutApi() } catch { /* 令牌可能已失效，本地照清 */ }
+  store.logout()
+  ElMessage.success('已退出登录')
+  router.push('/login')
+}
+const goPublish = () => router.push('/user/items/new')
 </script>
 
 <template>
-  <div class="placeholder">
-    <h2>前台布局</h2>
-    <p>全站顶栏+页脚</p>
-    <p class="tag">（M10 落地，骨架占位）</p>
-    <router-view v-if="hasChild" />
+  <div class="site">
+    <header class="topbar">
+      <div class="wrap">
+        <router-link to="/" class="brand">校园失物招领</router-link>
+        <nav class="navs">
+          <router-link v-for="n in NAVS" :key="n.path" :to="n.path"
+                       :class="['nav', { on: isActive(n.path) }]">{{ n.label }}</router-link>
+        </nav>
+        <div class="right">
+          <el-button v-if="store.isLoggedIn" type="primary" size="small" @click="goPublish">我要发布</el-button>
+          <template v-if="store.isLoggedIn">
+            <router-link to="/user" class="user-link">{{ store.user?.nickname || '我的中心' }}</router-link>
+            <el-button link size="small" @click="logout">退出</el-button>
+          </template>
+          <el-button v-else type="primary" size="small" @click="router.push('/login')">登录 / 注册</el-button>
+        </div>
+      </div>
+    </header>
+
+    <div v-if="banner && route.path === '/'" class="banner">
+      <div class="wrap banner-inner">
+        <el-tag size="small" type="warning" effect="dark">公告</el-tag>
+        <router-link to="/announcements" class="banner-title">{{ banner.title }}</router-link>
+      </div>
+    </div>
+
+    <main class="main">
+      <router-view />
+    </main>
+
+    <footer class="foot">
+      <div class="wrap">校园失物招领系统 · 软件工程毕业设计</div>
+    </footer>
   </div>
 </template>
 
-<script>
-export default {
-  computed: {
-    // SiteLayout 无 children 时 router-view 渲染自身会递归，用路由表判断
-    hasChild() {
-      return this.$route.matched.some((r) => r.children && r.children.length)
-    }
-  }
-}
-</script>
-
 <style scoped>
-.placeholder { padding: 40px; text-align: center; color: #606266; }
-.tag { color: #909399; font-size: 13px; }
+.site { min-height: 100vh; display: flex; flex-direction: column; background: #f5f7fa; }
+.wrap { max-width: 1080px; margin: 0 auto; width: 100%; }
+.topbar { background: #fff; border-bottom: 1px solid #ebeef5; position: sticky; top: 0; z-index: 10; }
+.topbar .wrap { display: flex; align-items: center; height: 56px; gap: 24px; }
+.brand { font-weight: 700; font-size: 18px; color: #409eff; text-decoration: none; }
+.navs { display: flex; gap: 4px; flex: 1; }
+.nav { padding: 6px 14px; border-radius: 6px; color: #606266; text-decoration: none; font-size: 14px; }
+.nav:hover { background: #f0f2f5; }
+.nav.on { background: #ecf5ff; color: #409eff; font-weight: 600; }
+.right { display: flex; align-items: center; gap: 10px; }
+.user-link { color: #409eff; text-decoration: none; font-size: 14px; }
+.banner { background: #fff7e6; border-bottom: 1px solid #ffe7ba; }
+.banner-inner { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
+.banner-title { color: #b8860b; text-decoration: none; font-size: 14px; }
+.main { flex: 1; }
+.foot { background: #fff; border-top: 1px solid #ebeef5; color: #909399; font-size: 13px; }
+.foot .wrap { padding: 16px 0; text-align: center; }
 </style>

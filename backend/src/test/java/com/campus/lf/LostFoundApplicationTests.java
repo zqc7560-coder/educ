@@ -30,6 +30,7 @@ import org.springframework.data.redis.connection.RedisConnection;
 import org.springframework.data.redis.core.StringRedisTemplate;
 import org.springframework.jdbc.core.JdbcTemplate;
 import org.springframework.test.context.ActiveProfiles;
+import org.springframework.transaction.annotation.Transactional;
 import org.springframework.test.web.servlet.MockMvc;
 
 import java.time.LocalDateTime;
@@ -77,6 +78,17 @@ class LostFoundApplicationTests {
         it.setClaimCount(0);
         it.setVersion(0);
         return it;
+    }
+
+    /**
+     * M10 污染收口：本类刻意不加类级 @Transactional（共享 SqlSession 的
+     * MyBatis 一级缓存会让乐观锁用例的两次 selectById 拿到同一实例、
+     * "过期窗口"不复存在），改为每个用例后物理清掉自己的冒烟行——
+     * 此前这些行泄漏进共享 H2，污染后续测试类的计数断言（M4 同款纪律的另一面）。
+     */
+    @org.junit.jupiter.api.AfterEach
+    void purgeSmokeRows() {
+        jdbcTemplate.update("delete from lost_item where title in ('列映射冒烟','乐观锁样本','将被逻辑删除')");
     }
 
     @Test

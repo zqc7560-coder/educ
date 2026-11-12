@@ -355,6 +355,66 @@ public class ItemService {
         log.info("物品删除 id={} by uid={} owner={}", id, me.getUserId(), owner);
     }
 
+    // ==================================================================
+    // 回收站（M10，管理员治理通道；逻辑删行的读/复活/物理删必须走自定义 SQL——
+    // MP 拦截器恒拼 deleted=0，内置 API 对已删行语义上不可达，LostItemMapper 注释详述）
+    // ==================================================================
+
+    /** 回收站分页（GET /api/items/trash，item:audit）：只列已删行，keyword 打标题 */
+    public PageResult<ItemVO> pageTrash(LoginUser me, String keyword, long pageNum, long pageSize) {
+        assertGovernor(me);
+        var page = itemMapper.selectTrashPage(
+                new com.baomidou.mybatisplus.extension.plugins.pagination.Page<>(pageNum, pageSize),
+                keyword == null || keyword.isBlank() ? null : keyword.trim());
+        List<LostItem> rows = page.getRecords();
+        Set<Long> userIds = rows.stream().map(LostItem::getUserId).collect(Collectors.toSet());
+        Map<Long, String> nicknames = userIds.isEmpty() ? Map.of()
+                : userMapper.selectBatchIds(userIds).stream()
+                    .collect(Collectors.toMap(SysUser::getId, SysUser::getNickname));
+        List<ItemVO> list = rows.stream().map(r -> ItemVO.builder()
+                .id(r.getId()).type(r.getType()).title(r.getTitle())
+                .categoryId(r.getCategoryId()).userId(r.getUserId())
+                .userNickname(nicknames.get(r.getUserId()))
+                .status(r.getStatus()).viewCount(r.getViewCount())
+                .createdAt(r.getCreatedAt()).build()).toList();
+        return new PageResult<>(page.getTotal(), page.getPages(), page.getCurrent(),
+                page.getSize(), list);
+    }
+
+    /** 复活（POST /api/items/{id}/restore）：deleted 1→0，状态保持删除前原值；幂等 0 行报语义错 */
+    @Transactional
+    public void restore(LoginUser me, Long id) {
+        assertGovernor(me);
+        LostItem trashed = itemMapper.selectTrashedById(id);
+        if (trashed == null) {
+            throw new BizException(BizCode.ITEM_NOT_FOUND, "回收站中没有这条物品（可能已恢复或不存在）", 404);
+        }
+        if (itemMapper.reviveById(id) == 0) {
+            throw new BizException(BizCode.ITEM_STATUS_INVALID, "该物品已在库中");
+        }
+        cache.evictTx(id);
+        log.info("管理员 {} 复活物品 id={}（原状态 {}）", me.getUserId(), id, trashed.getStatus());
+    }
+
+    /** 彻底删除（DELETE /api/items/{id}/purge）：物理删行，图片随删；SQL 自带 deleted=1 安全锁 */
+    @Transactional
+    public void purge(LoginUser me, Long id) {
+        assertGovernor(me);
+        if (itemMapper.selectTrashedById(id) == null) {
+            throw new BizException(BizCode.ITEM_NOT_FOUND, "回收站中没有这条物品（彻底删除只对已删行生效）", 404);
+        }
+        imageMapper.delete(new LambdaQueryWrapper<ItemImage>().eq(ItemImage::getItemId, id));
+        itemMapper.purgeById(id);
+        cache.evictTx(id);
+        log.info("管理员 {} 彻底删除物品 id={}（物理删行，不可恢复）", me.getUserId(), id);
+    }
+
+    private void assertGovernor(LoginUser me) {
+        if (me == null || !(me.getPerms().contains("item:audit") || me.getPerms().contains("item:offline"))) {
+            throw new BizException(BizCode.FORBIDDEN, BizCode.FORBIDDEN.getMessage(), 403);
+        }
+    }
+
     /** 发布图片（POST /api/items/{id}/images 之外的独立上传通道由 M8 通用口承接；
      *  这里给 save/编辑流程提供 URL 重建） */
     private void rebuildImages(Long itemId, List<String> urls) {
@@ -522,6 +582,8 @@ public class ItemService {
                 .description(item.getDescription())
                 .categoryId(item.getCategoryId())
                 .categoryName(cat == null ? null : cat.getName())
+                .campusId(item.getCampusId())
+                .buildingId(item.getBuildingId())
                 .campusName(areaName(item.getCampusId()))
                 .buildingName(areaName(item.getBuildingId()))
                 .locationText(item.getLocationText())

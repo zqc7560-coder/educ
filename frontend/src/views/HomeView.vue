@@ -1,19 +1,76 @@
 <script setup>
 /**
- * 首页 —— M6/M10 落地的页面（骨架占位）。
- * 公告横幅 + 最新失物/拾物 + 相似推荐入口。实体在对应模块完成时替换，路由地址自 M0 起保持稳定。
+ * 失物大厅/首页（M10 实体版）：筛选（类型/分类/关键词/排序）+ 分页列表。
+ *
+ * 数据纪律：列表请求带条件即重建（不叠分页游标）；翻页保持条件；失败保留旧数据
+ * 只 toast（拦截器统一弹）——空态用 el-empty 明示而非白屏。
  */
+import { ref, reactive, onMounted } from 'vue'
+import { listItems, fetchCategories } from '@/api/item'
+import ItemCard from '@/components/ItemCard.vue'
+
+const q = reactive({ type: '', categoryId: null, keyword: '', sort: 'new', pageNum: 1, pageSize: 12 })
+const rows = ref([])
+const total = ref(0)
+const loading = ref(false)
+const cats = ref([])
+
+async function load() {
+  loading.value = true
+  try {
+    const params = { pageNum: q.pageNum, pageSize: q.pageSize, sort: q.sort }
+    if (q.type) params.type = q.type
+    if (q.categoryId) params.categoryId = q.categoryId
+    if (q.keyword) params.keyword = q.keyword
+    const page = await listItems(params)
+    rows.value = page.list || []
+    total.value = page.total || 0
+  } catch { rows.value = [] } finally { loading.value = false }
+}
+function search() { q.pageNum = 1; load() }
+
+onMounted(async () => {
+  load()
+  try { cats.value = await fetchCategories('ITEM') } catch { cats.value = [] }
+})
 </script>
 
 <template>
-  <div class="placeholder">
-    <h2>首页</h2>
-    <p>公告横幅 + 最新失物/拾物 + 相似推荐入口</p>
-    <p class="tag">（M6/M10 落地，骨架占位）</p>
+  <div class="wrap hall">
+    <div class="filters">
+      <el-radio-group v-model="q.type" @change="search">
+        <el-radio-button value="">全部</el-radio-button>
+        <el-radio-button value="LOST">失物</el-radio-button>
+        <el-radio-button value="FOUND">招领</el-radio-button>
+      </el-radio-group>
+      <el-select v-model="q.categoryId" placeholder="全部分类" clearable style="width:140px" @change="search">
+        <el-option v-for="c in cats" :key="c.id" :label="c.name" :value="c.id" />
+      </el-select>
+      <el-input v-model="q.keyword" placeholder="搜标题/描述关键词" clearable style="width:240px"
+                @keyup.enter="search" @clear="search" />
+      <el-select v-model="q.sort" style="width:120px" @change="search">
+        <el-option label="最新" value="new" />
+        <el-option label="最热" value="hot" />
+      </el-select>
+      <el-button type="primary" @click="search">检索</el-button>
+    </div>
+
+    <div v-loading="loading" class="grid">
+      <ItemCard v-for="it in rows" :key="it.id" :item="it" />
+      <el-empty v-if="!loading && !rows.length" description="没有符合条件的物品" class="empty" />
+    </div>
+
+    <el-pagination v-if="total > q.pageSize" class="pager" layout="prev, pager, next"
+                   :total="total" :page-size="q.pageSize" :current-page="q.pageNum"
+                   @current-change="(p) => { q.pageNum = p; load() }" />
   </div>
 </template>
 
 <style scoped>
-.placeholder { padding: 40px; text-align: center; color: #606266; }
-.tag { color: #909399; font-size: 13px; }
+.wrap { max-width: 1080px; margin: 0 auto; }
+.hall { padding: 20px 16px 40px; }
+.filters { display: flex; gap: 10px; flex-wrap: wrap; margin-bottom: 16px; align-items: center; }
+.grid { display: grid; grid-template-columns: repeat(auto-fill, minmax(320px, 1fr)); gap: 14px; min-height: 200px; }
+.empty { grid-column: 1 / -1; }
+.pager { margin-top: 20px; justify-content: center; }
 </style>

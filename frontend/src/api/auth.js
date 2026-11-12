@@ -33,3 +33,8 @@ export function refresh() {
 export function fetchMe() {
   return request.get('/auth/me')
 }
+
+/** 改密（M2 后端 PUT /users/password）：成功后全端下线，调用方负责清本地态 */
+export function changePassword(data) {
+  return request.put('/users/password', data)
+}

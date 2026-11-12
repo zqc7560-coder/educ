@@ -33,7 +33,9 @@ public class ItemVO {
     private Long categoryId;
     private String categoryName;
 
-    /** 地点三件套：校区名-楼栋名-自由文本（装配期联查字典） */
+    /** 地点三件套：校区名-楼栋名-自由文本（装配期联查字典）；id 供编辑页回显复选 */
+    private Long campusId;
+    private Long buildingId;
     private String campusName;
     private String buildingName;
     private String locationText;

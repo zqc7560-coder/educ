@@ -1,0 +1,50 @@
+/**
+ * 论坛接口封装（M10）—— 对齐 ForumController：帖子/两级回复树/点赞/举报。
+ * 字典口（板块=category kind=BOARD）不在这里——分类接口归 item.js 的
+ * fetchCategories(kind)，避免同一 URL 在两个模块各封一遍（口径漂移源）。
+ */
+import request from './request'
+
+export function listPosts(params) {
+  // {boardId,keyword,status,mine,sort,pageNum,pageSize}
+  return request.get('/forum/posts', { params })
+}
+export function fetchPost(id) {
+  return request.get(`/forum/posts/${id}`)
+}
+export function createPost(data) {
+  return request.post('/forum/posts', data)
+}
+export function updatePost(id, data) {
+  return request.put(`/forum/posts/${id}`, data)
+}
+export function deletePost(id) {
+  return request.delete(`/forum/posts/${id}`)
+}
+export function changePostStatus(id, target, reason) {
+  return request.patch(`/forum/posts/${id}/status`, reason ? { reason } : null, { params: { target } })
+}
+export function togglePostTop(id) {
+  return request.post(`/forum/posts/${id}/top`)
+}
+
+export function fetchReplyTree(postId) {
+  return request.get(`/forum/posts/${postId}/replies`)
+}
+/** data: {content, parentId?, replyToUserId?}（两级封顶：parentId 只许指一级回复） */
+export function replyPost(postId, data) {
+  return request.post(`/forum/posts/${postId}/replies`, data)
+}
+export function deleteReply(replyId) {
+  return request.delete(`/forum/replies/${replyId}`)
+}
+
+export function likePost(id) {
+  return request.post(`/forum/posts/${id}/like`)
+}
+export function unlikePost(id) {
+  return request.delete(`/forum/posts/${id}/like`)
+}
+export function reportPost(id, reason) {
+  return request.post(`/forum/posts/${id}/report`, { reason })
+}
