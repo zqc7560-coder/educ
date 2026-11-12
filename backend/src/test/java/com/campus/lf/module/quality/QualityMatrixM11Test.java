@@ -50,7 +50,9 @@ import static org.springframework.test.web.servlet.result.MockMvcResultMatchers.
 @SpringBootTest
 @AutoConfigureMockMvc
 @ActiveProfiles("test")
-@Transactional
+// 无类级 @Transactional：本类数据隔离靠物理清扫（sweepMatrixRows），
+// 不靠回滚——CI/Linux 与本地/Windows 的跑序差异会暴露"回滚跨语境不可依赖"
+// （M11 复盘：ForumApiM5Test.publishFlow 在 CI 数到本类 2 条代数律帖）
 @DisplayName("M11 质量矩阵")
 class QualityMatrixM11Test {
 
@@ -72,6 +74,28 @@ class QualityMatrixM11Test {
         public StringRedisTemplate stringRedisTemplate() {
             return InMemoryRedis.template();
         }
+    }
+
+    /** 矩阵造数物理清扫（M11 CI 红复盘）：物品=标题'矩阵%'，帖=标题
+     *  '代数律帖%'，新号=email 尾缀'@matrix.test'，群发通知=标题'矩阵群发'。
+     *  关联子表逐级先删；矩阵新号（email 尾缀 @matrix.test）连同其治理操作
+     *  日志一并物理删除。每个 @AfterEach 幂等重放，多删零行
+     *  无害。无类事务语境（本类已摘 @Transactional），DELETE 真实生效。 */
+    private void sweepMatrixRows() {
+        jdbcTemplate.update("DELETE FROM item_image     WHERE item_id IN (SELECT id FROM lost_item WHERE title LIKE '矩阵%')");
+        jdbcTemplate.update("DELETE FROM claim_log      WHERE claim_id IN (SELECT id FROM item_claim WHERE item_id IN (SELECT id FROM lost_item WHERE title LIKE '矩阵%'))");
+        jdbcTemplate.update("DELETE FROM notification   WHERE biz_id IN (SELECT id FROM lost_item WHERE title LIKE '矩阵%') OR biz_id IN (SELECT id FROM forum_post WHERE title LIKE '代数律帖%') OR title = '矩阵群发'");
+        jdbcTemplate.update("DELETE FROM item_claim     WHERE item_id IN (SELECT id FROM lost_item WHERE title LIKE '矩阵%')");
+        jdbcTemplate.update("DELETE FROM lost_item      WHERE title LIKE '矩阵%'");
+        jdbcTemplate.update("DELETE FROM post_image     WHERE post_id IN (SELECT id FROM forum_post WHERE title LIKE '代数律帖%')");
+        jdbcTemplate.update("DELETE FROM forum_like     WHERE post_id IN (SELECT id FROM forum_post WHERE title LIKE '代数律帖%')");
+        jdbcTemplate.update("DELETE FROM forum_reply    WHERE post_id IN (SELECT id FROM forum_post WHERE title LIKE '代数律帖%')");
+        jdbcTemplate.update("DELETE FROM forum_post     WHERE title LIKE '代数律帖%'");
+        // 表名对照 schema-h2.sql：sys_user/sys_user_role/operation_log；登录态
+        // 在 Redis 黑名单不在 DB（TestCacheGuardExtension 逐用例清缓存态）
+        jdbcTemplate.update("DELETE FROM operation_log  WHERE user_id IN (SELECT id FROM sys_user WHERE email LIKE '%@matrix.test')");
+        jdbcTemplate.update("DELETE FROM sys_user_role  WHERE user_id IN (SELECT id FROM sys_user WHERE email LIKE '%@matrix.test')");
+        jdbcTemplate.update("DELETE FROM sys_user       WHERE email LIKE '%@matrix.test'");
     }
 
     private JsonNode envelope(MvcResult r) throws Exception {
@@ -96,7 +120,7 @@ class QualityMatrixM11Test {
         mockMvc.perform(post("/api/auth/register").contentType(MediaType.APPLICATION_JSON)
                 .content("{\"studentNo\":\"" + no + "\",\"nickname\":\"矩阵" + no
                         + "\",\"password\":\"Abcd@1234\",\"confirmPassword\":\"Abcd@1234\","
-                        + "\"email\":\"" + no + "@campus.edu.cn\"}"));
+                        + "\"email\":\"" + no + "@matrix.test\"}"));
         return no;
     }
 
@@ -136,9 +160,11 @@ class QualityMatrixM11Test {
     // ==================================================================
 
     @Nested
-    @Transactional
     @DisplayName("物品 lost_item 状态转移矩阵（治理口 PATCH /items/{id}/status）")
     class ItemMatrix {
+
+        @org.junit.jupiter.api.AfterEach
+        void sweep() { sweepMatrixRows(); }
 
         // from, to, 期望码（0=合法）——与 ItemService.ALLOWED 表一一对读
         @ParameterizedTest(name = "{0}→{1} 期望 {2}")
@@ -183,9 +209,11 @@ class QualityMatrixM11Test {
     // ==================================================================
 
     @Nested
-    @Transactional
     @DisplayName("认领 item_claim 状态转移矩阵")
     class ClaimMatrix {
+
+        @org.junit.jupiter.api.AfterEach
+        void sweep() { sweepMatrixRows(); }
 
         /** 把认领单驱动到指定状态：0=申请后原样 1=verify通过 3=拒绝 4=仲裁(经0或3) */
         private long claimIn(String[] finderOut, String claimantTok, String mgrTok, int want) throws Exception {
@@ -193,7 +221,7 @@ class QualityMatrixM11Test {
             finderOut[0] = finderTok;
             ItemSaveDTO dto = new ItemSaveDTO();
             dto.setType("FOUND");
-            dto.setTitle("认领矩阵" + System.nanoTime());
+            dto.setTitle("矩阵认领件" + System.nanoTime());
             dto.setDescription("描述");
             dto.setCategoryId(1L);
             dto.setHappenedAt(LocalDateTime.now().minusDays(1));
@@ -301,9 +329,11 @@ class QualityMatrixM11Test {
     // ==================================================================
 
     @Nested
-    @Transactional
     @DisplayName("点赞幂等：like×N 恒 1、unlike×M 恒 0、交替序列等于奇偶性")
     class LikeAlgebra {
+
+        @org.junit.jupiter.api.AfterEach
+        void sweep() { sweepMatrixRows(); }
 
         private long publishedPost(String stuIgnored, String mgr) throws Exception {
             String stu = freshPublisher();
@@ -360,9 +390,11 @@ class QualityMatrixM11Test {
     // ==================================================================
 
     @Nested
-    @Transactional
     @DisplayName("治理口 ACL 矩阵：未登录 401/信封1001，学生 1005，MANAGER 按权限矩阵放行或拒绝")
     class AdminAclMatrix {
+
+        @org.junit.jupiter.api.AfterEach
+        void sweep() { sweepMatrixRows(); }
 
         /** 口清单：path, method, MANAGER 期望（0=放行，1005=权限矩阵不含） */
         @ParameterizedTest(name = "{0} {1} MANAGER期望={2}")
