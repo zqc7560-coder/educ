@@ -97,9 +97,12 @@ public class JwtAuthFilter extends OncePerRequestFilter {
             }
             long invalidBeforeMs = blacklistService.getInvalidBefore(
                     claims.get("uid", Number.class).longValue());
-            // 签发时刻(毫秒)早于失效水位 ⇒ 该令牌产生于"被踢下线"之前，作废
-            // （禁用账号 / 改密 / 角色变更 / 管理员强制下线走这个分支，《API接口设计.md》§8）
-            if (invalidBeforeMs > 0 && JwtService.issuedAtMs(claims) < invalidBeforeMs) {
+            // 签发时刻(毫秒)不晚于失效水位 ⇒ 该令牌产生于"被踢下线"之前，作废
+            // （禁用账号 / 改密 / 角色变更 / 管理员强制下线走这个分支，《API接口设计.md》§8）。
+            // 判定用 <= 不用 <：同毫秒边界保守作废。< 会在"登录→封禁"同毫秒时漏放
+            // （M2 踢线用例全量跑偶现 200 的根因）；而"水位同毫秒的新登录"物理上
+            // 不存在——登录含 BCrypt 校验+JWT 签名，毫秒级窗口进不去第二个令牌。
+            if (invalidBeforeMs > 0 && JwtService.issuedAtMs(claims) <= invalidBeforeMs) {
                 writeError(response, HttpStatus.UNAUTHORIZED, BizCode.UNAUTHORIZED);
                 return;
             }

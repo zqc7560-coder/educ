@@ -82,6 +82,9 @@ public class ClaimService {
     private final LostItemMapper itemMapper;
     private final SysUserMapper userMapper;
     private final NotificationMapper notificationMapper;
+    // M9：claim 域里有两处直接改 lost_item（确认归还下架/仲裁判归下架）——
+    // 绕过 ItemService 的写路径必须自己失效，否则游客详情缓存最长 30min 仍显示"已发布"
+    private final com.campus.lf.module.item.service.ItemCacheService itemCache;
 
     // ==================================================================
     // 申请
@@ -215,6 +218,7 @@ public class ClaimService {
         itemPatch.setStatus(ItemService.STATUS_OFFLINE);
         itemPatch.setOfflineReason("已归还");
         itemMapper.updateById(itemPatch);
+        itemCache.evictTx(item.getId());
 
         writeLog(claimId, me.getUserId(), "CONFIRM_RETURN", null);
         notify(claim.getClaimantId(), "RETURN_CONFIRM", item.getId(),
@@ -302,6 +306,7 @@ public class ClaimService {
             itemPatch.setStatus(ItemService.STATUS_OFFLINE);
             itemPatch.setOfflineReason("仲裁判归");
             itemMapper.updateById(itemPatch);
+            itemCache.evictTx(item.getId());
             closeOtherClaims(item.getId(), claimId, me.getUserId());
         } else {
             patch.setStatus(ST_REJECTED);

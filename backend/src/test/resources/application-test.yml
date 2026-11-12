@@ -42,3 +42,7 @@ lf:
   announcement:
     expire-initial-delay-ms: 86400000
     expire-interval-ms: 86400000
+  # M9：PV 回写同样禁自动（测试显式调用 PvSyncJob.syncNow 驱动）
+  pv:
+    initial-delay-ms: 86400000
+    sync-interval-ms: 86400000

@@ -87,6 +87,9 @@ public class ItemService {
     // M7 旁路：匹配推荐+站内消息都是"尽力而为"的增强，push/notify 内部吞异常
     private final com.campus.lf.module.notice.service.MatchService matchService;
     private final com.campus.lf.module.notice.service.NotificationService notificationService;
+    // M9 缓存：读侧 Cache-Aside、写侧事务双删；Redis 任何故障都在服务内部
+    // try-catch 降级，业务方法签名与正确性口径零变化
+    private final ItemCacheService cache;
 
     // ==================================================================
     // 检索
@@ -103,6 +106,16 @@ public class ItemService {
                                         Long campusId, Long buildingId,
                                         LocalDateTime from, LocalDateTime to,
                                         String sort, long pageNum, long pageSize) {
+        // M9：列表缓存只罩"公开检索"这一个口（mine/审核台视图带身份维度不缓存）。
+        // key=规范化参数 md5；命中直接返回缓存信封；miss 回源后回填并登记键清单。
+        String cacheKey = cache.listKey(ItemCacheService.canonical(
+                type, categoryId, keyword, campusId, buildingId,
+                from == null ? null : from.toString(), to == null ? null : to.toString(),
+                sort, pageNum, pageSize));
+        ItemCacheService.CachePage hit = cache.getList(cacheKey);
+        if (hit != null) {
+            return new PageResult<>(hit.total(), hit.pages(), hit.pageNum(), hit.pageSize(), hit.list());
+        }
         LambdaQueryWrapper<LostItem> qw = new LambdaQueryWrapper<LostItem>()
                 .eq(LostItem::getStatus, STATUS_PUBLISHED);
         if (type != null && !type.isBlank()) {
@@ -138,7 +151,11 @@ public class ItemService {
         }
 
         Page<LostItem> page = itemMapper.selectPage(new Page<>(pageNum, pageSize), qw);
-        return assemblePage(page);
+        PageResult<ItemVO> result = assemblePage(page);
+        cache.putList(cacheKey, new ItemCacheService.CachePage(
+                result.getTotal(), result.getPages(), result.getPageNum(),
+                result.getPageSize(), result.getList()));
+        return result;
     }
 
     /** 我的发布（GET /api/items/mine，登录）：全状态对自己透明（草稿/待审/下架都在） */
@@ -154,14 +171,27 @@ public class ItemService {
 
     /** 详情（GET /api/items/{id}）：可见性矩阵 + 浏览计数 + 登录态字段脱敏分级 */
     public ItemVO detail(Long id, LoginUser me) {
+        // M9 读路径。缓存安全前提=「任何人读到的完全一致」，本系统只有游客视图满足
+        // （contact 登录才填充）——所以缓存只罩 me=null 分支：游客吃缓存（全站最大读
+        // 流量），登录者直查 DB 走完整可见性矩阵。回填同理只在游客读路径做，
+        // 且仅发布态（待审/下架对作者要求"所见即最新"，缓存制造改而未生效假象）。
+        if (me == null) {
+            ItemVO cached = cache.getDetail(id);
+            if (cached != null) {
+                cache.countPv(id);
+                return cached;
+            }
+        }
         LostItem item = requireItem(id);
         assertReadable(item, me);
-        // 浏览计数 SQL 原子自增（M9 将换成 Redis 计数+定时回写；本期先正确后快）
-        itemMapper.update(null, new LambdaUpdateWrapper<LostItem>()
-                .eq(LostItem::getId, id)
-                .setSql("view_count = view_count + 1"));
-        item.setViewCount(item.getViewCount() + 1);
-        return assemble(item, me, true);
+        // PV 计数在可见性闸之后：404/403 路径不计数——"看不见的东西被浏览"
+        // 会污染趋势数据（博客 M9 同口径）
+        cache.countPv(id);
+        ItemVO vo = assemble(item, me, true);
+        if (me == null && item.getStatus() == STATUS_PUBLISHED) {
+            cache.putDetail(id, vo);   // vo 此刻即游客视图（me=null 装配），无个人字段
+        }
+        return vo;
     }
 
     // ==================================================================
@@ -216,6 +246,7 @@ public class ItemService {
         itemMapper.insert(item);
 
         rebuildImages(item.getId(), dto.getImageUrls());
+        cache.evictTx(item.getId());   // 列表键登记制全删：直发件要出现在"最新发布"里
         if (requested == STATUS_PUBLISHED) {
             matchService.matchAndNotify(item);   // 直发件：入库即可见，立刻找对端
         }
@@ -253,6 +284,7 @@ public class ItemService {
         if (dto.getImageUrls() != null) {
             rebuildImages(id, dto.getImageUrls());
         }
+        cache.evictTx(id);
     }
 
     /**
@@ -302,6 +334,7 @@ public class ItemService {
                     item.getStatus() == STATUS_PENDING ? "物品审核未通过" : "物品被下架",
                     "《" + item.getTitle() + "》" + (item.getStatus() == STATUS_PENDING ? "审核驳回：" : "已被管理员下架：") + reason);
         }
+        cache.evictTx(id);
         log.info("状态流转 id={} {}→{} by uid={} reason={}", id, item.getStatus(), target,
                 me.getUserId(), reason);
     }
@@ -316,6 +349,7 @@ public class ItemService {
             throw new BizException(BizCode.ITEM_NOT_OWNER, BizCode.ITEM_NOT_OWNER.getMessage(), 403);
         }
         itemMapper.deleteById(id);   // @TableLogic：物理行保留，回收站/审计语义
+        cache.evictTx(id);
         // 在途认领单不在这里结算——M4 的 claim 域读物品时按"2001 已失效"处置，
         // 避免物品删除反向依赖认领模块（模块边界：item 不 import claim）
         log.info("物品删除 id={} by uid={} owner={}", id, me.getUserId(), owner);

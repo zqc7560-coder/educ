@@ -15,6 +15,10 @@ import java.util.List;
  */
 @Data
 @Builder
+// M9 缓存回环：详情/列表 VO 要进 Redis 再读回，@Builder 会吃掉无参构造导致
+// Jackson "no Creators"（博客 M9 实测坑），显式补无参+全参
+@lombok.NoArgsConstructor
+@lombok.AllArgsConstructor
 public class ItemVO {
 
     private Long id;

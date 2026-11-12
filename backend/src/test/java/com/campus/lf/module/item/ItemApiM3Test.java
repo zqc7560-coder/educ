@@ -64,6 +64,8 @@ class ItemApiM3Test {
     @Autowired private ObjectMapper objectMapper;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private LostItemMapper itemMapper;
+    @Autowired private com.campus.lf.job.PvSyncJob pvSyncJob;
+    @Autowired private com.campus.lf.module.item.service.ItemCacheService itemCache;
 
     @TestConfiguration
     static class RedisTestConfig {
@@ -539,18 +541,24 @@ class ItemApiM3Test {
     }
 
     @Test
-    @DisplayName("详情浏览计数原子自增（SQL setSql 版，M9 换 Redis 计数前的事实口径）")
+    @DisplayName("详情浏览计数 M9 口径：读进 lf:pv 计数，syncNow 回写 DB；展示允许滞后")
     void viewCountIncrements() throws Exception {
         String stu = login(STU_A);
         long id = createItem(stu, "LOST", "计数样本", null);
         publishViaAudit(login(STU_B), id);
 
-        mockMvc.perform(get("/api/items/" + id)).andExpect(jsonPath("$.code").value(0));
-        MvcResult r2 = mockMvc.perform(get("/api/items/" + id)).andReturn();
-        assertThat(envelope(r2).path("data").path("viewCount").asInt()).isGreaterThanOrEqualTo(2);
+        MvcResult r1 = mockMvc.perform(get("/api/items/" + id)).andReturn();
+        mockMvc.perform(get("/api/items/" + id)).andReturn();
+        // 展示语义变更（M9 决策，答辩口径）：详情 viewCount 来自缓存快照/DB 旧值，
+        // 允许滞后 ≤5min——浏览量是统计语义不是账本，换读路径零 UPDATE 主表
+        assertThat(envelope(r1).path("data").path("viewCount").asInt()).isEqualTo(0);
 
-        int dbCount = itemMapper.selectById(id).getViewCount();
-        assertThat(dbCount).isGreaterThanOrEqualTo(2);
+        // 事实口径：两读 = Redis 计数 2；回写作业落库后 DB=2
+        assertThat(itemCache.peekCounter("lf:pv:" + id)).isEqualTo(2);
+        pvSyncJob.syncNow();
+        assertThat(itemMapper.selectById(id).getViewCount()).isEqualTo(2);
+        // 取走即清零：键被 syncNow 消费
+        assertThat(itemCache.peekCounter("lf:pv:" + id)).isZero();
     }
 
     // ====================== 字典与清洗 ======================

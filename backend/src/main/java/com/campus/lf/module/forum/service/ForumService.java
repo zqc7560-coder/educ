@@ -94,10 +94,14 @@ public class ForumService {
     private final LostItemMapper itemMapper;          // 跨模块日限合计计数（只读）
     private final NotificationMapper notificationMapper;
     private final SensitiveWordGate wordGate;
+    private final org.springframework.data.redis.core.StringRedisTemplate redis;
 
-    /** 回复防刷：uid → 上次回复毫秒时间戳（进程内；见类注释多实例说明） */
-    private final ConcurrentHashMap<Long, Long> lastReplyAt = new ConcurrentHashMap<>();
+    /** 回复防刷（M9 Redis 化）：SETNX lf:gate:reply:{uid} TTL 10s——
+     *  键存在即"10 秒内已回过"。进程内 Map 退役：多实例部署下各自为政形同虚设，
+     *  Redis 单点锁键天然全局一致。Redis 故障 fail-open（防刷是体验护栏不是
+     *  正确性闸，宁放行不误伤发帖）。 */
     static final long REPLY_MIN_INTERVAL_MS = 10_000L;
+    private static final String REPLY_GATE_PREFIX = "lf:gate:reply:";
 
     // ==================================================================
     // 帖子
@@ -576,17 +580,25 @@ public class ForumService {
     }
 
     private void assertReplyRateLimit(Long userId) {
-        long now = System.currentTimeMillis();
-        Long last = lastReplyAt.get(userId);
-        if (last != null && now - last < REPLY_MIN_INTERVAL_MS) {
-            throw new BizException(BizCode.REPLY_TOO_FAST);
+        try {
+            Boolean ok = redis.opsForValue().setIfAbsent(REPLY_GATE_PREFIX + userId, "1",
+                    java.time.Duration.ofMillis(REPLY_MIN_INTERVAL_MS));
+            if (!Boolean.TRUE.equals(ok)) {
+                throw new BizException(BizCode.REPLY_TOO_FAST);
+            }
+        } catch (org.springframework.data.redis.RedisConnectionFailureException e) {
+            // fail-open：Redis 抖动不拦正常用户
+            log.warn("回复防刷降级放行 uid={}: {}", userId, e.getMessage());
         }
-        lastReplyAt.put(userId, now);
     }
 
-    /** 测试钩子：注入历史时间戳（等效等待过窗口），不暴露给业务层 */
+    /** 测试钩子：清掉防刷锁键（等效等过窗口） */
     public void seedLastReplyAt(Long userId, long ts) {
-        lastReplyAt.put(userId, ts);
+        try {
+            redis.delete(REPLY_GATE_PREFIX + userId);
+        } catch (Exception ignore) {
+            // 测试桩不会失败；真 Redis 抖动时等 TTL 自然过期即可
+        }
     }
 
     /** 日限合计：物品+帖子（方案 §3.3.1）；跨模块只读计数，无循环依赖 */
