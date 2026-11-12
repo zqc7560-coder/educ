@@ -28,6 +28,7 @@ import java.time.LocalDateTime;
 import java.util.concurrent.atomic.AtomicInteger;
 
 import static org.assertj.core.api.Assertions.assertThat;
+import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.delete;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.get;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.patch;
 import static org.springframework.test.web.servlet.request.MockMvcRequestBuilders.post;
@@ -56,6 +57,7 @@ class CacheApiM9Test {
     @Autowired private PvSyncJob pvSyncJob;
     @Autowired private LostItemMapper itemMapper;
     @Autowired private StringRedisTemplate redis;
+    @Autowired private com.campus.lf.config.AdminBootstrapRunner adminBootstrap;
 
     private static final String SEED_PWD = "password123";
     private static final String STU_A = "2023508090";
@@ -250,6 +252,31 @@ class CacheApiM9Test {
         assertThat(cache.getDetail(id)).isNull();
         assertThat(cache.getList(cache.listKey(ItemCacheService.canonical(
                 null, null, null, null, null, null, null, null, 1, 10)))).isNull();
+    }
+
+    @Test
+    @DisplayName("管理端清缓存口：DELETE /api/admin/cache 挂 config:manage——学生 403、干事 403、admin 200")
+    void adminCacheEndpoint() throws Exception {
+        String stu = login(STU_A);
+        mockMvc.perform(delete("/api/admin/cache").header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.code").value(BizCode.FORBIDDEN.getCode()));
+        // MANAGER 权限矩阵无 config:manage（M8 已钉过的粒度，运维口同族同闸）
+        mockMvc.perform(delete("/api/admin/cache").header("Authorization", "Bearer " + login(STU_B)))
+                .andExpect(jsonPath("$.code").value(BizCode.FORBIDDEN.getCode()));
+        adminBootstrap.run(null);
+        MvcResult res = mockMvc.perform(post("/api/auth/login")
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"studentNo\":\"admin\",\"password\":\"Admin@123\"}"))
+                .andExpect(status().isOk()).andReturn();
+        String admin = envelope(res).path("data").path("token").asText();
+        // 先造缓存再清：读一次详情回填 → 管理口清空 → 键消失
+        String stu2 = login(STU_A);
+        long id = createPublished(stu2, admin, "运维口样本");
+        mockMvc.perform(get("/api/items/" + id)).andReturn();
+        assertThat(cache.getDetail(id)).isNotNull();
+        mockMvc.perform(delete("/api/admin/cache").header("Authorization", "Bearer " + admin))
+                .andExpect(jsonPath("$.code").value(0));
+        assertThat(cache.getDetail(id)).isNull();
     }
 
     // ====================== Redis 故障降级 ======================

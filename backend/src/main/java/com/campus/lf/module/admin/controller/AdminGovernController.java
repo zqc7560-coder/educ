@@ -28,6 +28,7 @@ public class AdminGovernController {
 
     private final AdminGovernService governService;
     private final StatsService statsService;
+    private final com.campus.lf.module.item.service.ItemCacheService itemCache;
 
     // ---------- 审核队列 ----------
 
@@ -102,6 +103,18 @@ public class AdminGovernController {
     @GetMapping("/stats/overview")
     public Result<Map<String, Object>> overview(@AuthenticationPrincipal LoginUser me) {
         return Result.ok(statsService.overview(me));
+    }
+
+    // ---------- 缓存运维 ----------
+
+    /** 应急清缓存（config:manage 口径——它本质是运维参数动作；脏窗口过长时的手动闸门） */
+    @DeleteMapping("/cache")
+    public Result<Map<String, Long>> clearCache(@AuthenticationPrincipal LoginUser me) {
+        if (!me.getPerms().contains("config:manage")) {
+            throw new com.campus.lf.common.BizException(
+                    com.campus.lf.common.BizCode.FORBIDDEN, com.campus.lf.common.BizCode.FORBIDDEN.getMessage(), 403);
+        }
+        return Result.ok(Map.of("cleared", itemCache.evictAll()));
     }
 
     // ---------- 操作日志 ----------
