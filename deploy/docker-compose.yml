@@ -1,0 +1,132 @@
+# =====================================================================
+# 校园失物招领系统 · 一键部署编排（M12）
+# 蓝本：博客毕设 deploy/docker-compose.yml 定稿（全部 healthcheck/卷/级联
+# profile 教训前置规避），差异点：
+#   - 库名 lost_found_db；后端端口 8081（与博客同机演示互不占用）
+#   - Redis database **1**（本机博客占 db0；容器化单机部署独立实例其实
+#     可回 db0，但为与开发口径统一且防"同机混跑"事故，compose 注入 db 1）
+#   - 无 AI 密钥族；管理员口令 LF_ADMIN_PASSWORD（M2 AdminBootstrapRunner）
+#
+# 用法（Ubuntu 22.04 / 任意装了 Docker+Compose v2 的机器）：
+#   cd deploy && cp .env.example .env && vi .env（填强口令）
+#   docker compose up -d --build     # 到可访问 <5 分钟
+#   bash scripts/verify-deploy.sh    # 一键验收（容器态+接口链+种子+缓存链）
+#
+# ngram_token_size=2 的说明：生产 schema.sql 的 FULLTEXT WITH PARSER ngram
+# 依赖该启动参数（MySQL 建库后不可改，必须在这里给死——博客 D-9 同款纪律）。
+# =====================================================================
+
+services:
+  # ---------- MySQL 8.0：utf8mb4 + ngram 全文分词 ----------
+  mysql:
+    image: mysql:8.0
+    command:
+      - --ngram_token_size=2
+      - --default-time-zone=+08:00
+      - --character-set-server=utf8mb4
+      - --collation-server=utf8mb4_0900_ai_ci
+    environment:
+      MYSQL_ROOT_PASSWORD: ${MYSQL_ROOT_PASSWORD}   # compose 插值自 deploy/.env
+      # 【容器种子乱码根治位】镜像内默认 LANG 为空 → mysql 客户端按 latin1
+      # 解释 initdb 脚本字节再转存 utf8mb4 = 双重编码乱码（lf-verify 实测
+      # "欢迎…"存成"æ¬¢è¿—"）。显式 C.UTF-8 让客户端按 UTF-8 读脚本，
+      # 与本机命令行 --default-character-set=utf8mb4 同一课的两端。
+      LANG: C.UTF-8
+      # 库由 schema.sql 的 CREATE DATABASE IF NOT EXISTS 建（含 USE 语句），
+      # 这里再声明 MYSQL_DATABASE 双保险：空卷首启时 entrypoint 按序灌脚本。
+      MYSQL_DATABASE: lost_found_db
+    volumes:
+      - mysql-data:/var/lib/mysql
+      # 首启自动执行（按文件名序）：01 建表（自带 CREATE DATABASE+USE）→
+      # 02 幂等种子（全量 INSERT IGNORE，重复执行安全）。
+      # 【utf8mb4 连接纪律】entrypoint 默认按 utf8mb4 读 init 脚本（镜像内
+      # character-set-server 已对齐）——本机裸命令行灌库乱码的教训（M10）
+      # 在容器路径不复现，但 verify 脚本仍要带 --default-character-set 查询。
+      - ../backend/src/main/resources/db/mysql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
+      - ../backend/src/main/resources/db/mysql/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+    healthcheck:
+      # $$ 是 compose 转义：让容器内 shell 展开变量而非宿主机插值
+      test: ["CMD-SHELL", 'mysqladmin ping -h localhost -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
+      interval: 10s
+      retries: 12
+      start_period: 30s
+
+  # ---------- Redis 7：AOF everysec + requirepass（生产无密码=净负资产） ----------
+  redis:
+    image: redis:7-alpine
+    command: >
+      redis-server --appendonly yes --appendfsync everysec
+      --requirepass ${REDIS_PASS}
+      --maxmemory 256mb --maxmemory-policy allkeys-lru
+    # healthcheck 用容器侧展开的 $${REDIS_PASS}，必须把变量注入容器，
+    # 否则空密码认证 WRONGPASS → 永远 unhealthy → 后端 depends_on 死锁（博客实修）
+    environment:
+      REDIS_PASS: ${REDIS_PASS}
+    volumes:
+      - redis-data:/data
+    healthcheck:
+      test: ["CMD-SHELL", 'redis-cli -a "$${REDIS_PASS}" --no-auth-warning ping | grep -q PONG']
+      interval: 10s
+      retries: 6
+
+  # ---------- 后端：多阶段 Dockerfile，profile=docker 经 group 级联继承 prod ----------
+  lf-server:
+    build:
+      context: ../backend
+      dockerfile: Dockerfile
+    environment:
+      SPRING_PROFILES_ACTIVE: docker
+      LF_DB_URL: jdbc:mysql://mysql:3306/lost_found_db?useSSL=false&serverTimezone=Asia/Shanghai&allowPublicKeyRetrieval=true&characterEncoding=UTF-8
+      LF_DB_USERNAME: root
+      LF_DB_PASSWORD: ${MYSQL_ROOT_PASSWORD}
+      LF_REDIS_HOST: redis
+      LF_REDIS_PORT: "6379"
+      LF_REDIS_PASSWORD: ${REDIS_PASS}
+      # 与博客同机共 Redis 时的分库键（容器内独立 Redis 也可 0，统一注入 1）
+      LF_REDIS_DB: "1"
+      LF_JWT_SECRET: ${LF_JWT_SECRET}
+      # M2 AdminBootstrapRunner：首启幂等创建 admin（挂 ROLE_ADMIN），只提示不打印口令
+      LF_ADMIN_PASSWORD: ${LF_ADMIN_PASSWORD:-Admin@123}
+      LF_UPLOAD_DIR: /app/uploads
+      TZ: Asia/Shanghai
+    volumes:
+      - uploads:/app/uploads
+      - ./logs:/app/logs
+    depends_on:
+      mysql: { condition: service_healthy }
+      redis: { condition: service_healthy }
+    healthcheck:
+      test: ["CMD", "curl", "-fsS", "http://localhost:8081/api/health"]
+      interval: 15s
+      retries: 8
+      start_period: 60s
+
+  # ---------- Nginx：SPA 静态托管 + /api 反代 + /uploads 图片直出 ----------
+  nginx:
+    image: nginx:1.25-alpine
+    # healthcheck 打 /api/health 而非 /：一条断言同时核验 nginx→后端反代链路
+    # （首页 200 由 verify 脚本独立负责——博客 M12 口径）
+    healthcheck:
+      test: ["CMD-SHELL", "wget -q --spider -T 5 http://127.0.0.1/api/health || exit 1"]
+      interval: 15s
+      retries: 5
+      start_period: 10s
+    ports:
+      - "8088:80"
+      # 演示机无 TLS 证书时 443 映射保持注释：nginx 不 listen 443 却映射
+      # 端口只会把 443 黑洞化（连上必断），误导排障。
+      # 宿主机端口选 8088：本机博客容器占 80、开发服务占 5174——同机混跑不冲突。
+    volumes:
+      - ./nginx/conf.d:/etc/nginx/conf.d:ro
+      # 前端产物先在宿主机 npm run build（README 步骤 2；不引 node 构建容器——
+      # 毕设量级构建 30s，加一个镜像层不值得）
+      - ../frontend/dist:/usr/share/nginx/html:ro
+      # 与后端共享 uploads 卷：图片由后端写入、Nginx 直出（带缓存头）
+      - uploads:/usr/share/nginx/uploads:ro
+    depends_on:
+      lf-server: { condition: service_healthy }
+
+volumes:
+  mysql-data: {}
+  redis-data: {}
+  uploads: {}

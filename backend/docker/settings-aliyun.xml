@@ -1,0 +1,26 @@
+<?xml version="1.0" encoding="UTF-8"?>
+<!-- =====================================================================
+ 容器构建阶段专用 Maven 设置（M12 部署件，博客毕设 M13 实测定稿照搬）。
+
+ 背景：maven:3.9-eclipse-temurin-21 镜像内置"裸" settings——一切走
+ Central。国内无代理冷构建实测 7~54 kB/s，整棵 Spring Boot 树要 10~20 分钟。
+
+ 方案：构建期 COPY 本文件覆盖 /root/.m2/settings.xml，central 镜像到
+ 阿里云 public 聚合仓。mirrorOf 只写 central 不写 *：将来若声明私有仓
+ 不被劫持。仅影响"容器构建"一条路径——GitHub Actions 与本机 mvn 不经此文件。
+
+ 与 BuildKit cache mount 正交叠加：镜像源解决冷构建慢，cache mount
+ 解决热缓存跨构建复用（真机数据：暖缓存改一行重建 ≈20s）。
+====================================================================== -->
+<settings xmlns="http://maven.apache.org/SETTINGS/1.0.0"
+          xmlns:xsi="http://www.w3.org/2001/XMLSchema-instance"
+          xsi:schemaLocation="http://maven.apache.org/SETTINGS/1.0.0 https://maven.apache.org/xsd/settings-1.0.0.xsd">
+  <mirrors>
+    <mirror>
+      <id>aliyun-public</id>
+      <name>Aliyun Maven Mirror (for CN-based Docker builds)</name>
+      <url>https://maven.aliyun.com/repository/public</url>
+      <mirrorOf>central</mirrorOf>
+    </mirror>
+  </mirrors>
+</settings>
