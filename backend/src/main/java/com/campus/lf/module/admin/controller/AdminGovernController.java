@@ -44,7 +44,7 @@ public class AdminGovernController {
     public Result<PageResult<Map<String, Object>>> pendingReplies(@AuthenticationPrincipal LoginUser me,
                                                                   @RequestParam(defaultValue = "1") long pageNum,
                                                                   @RequestParam(defaultValue = "10") long pageSize) {
-        return Result.ok(governService.pagePendingReplies(pageNum, pageSize));
+        return Result.ok(governService.pagePendingReplies(me, pageNum, pageSize));
     }
 
     /** 回复处置：body {target:1|2, reason} */

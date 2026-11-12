@@ -62,7 +62,7 @@ public class AdminGovernService {
         Map<String, Object> out = new HashMap<>();
         out.put("items", pagePendingItems(1, n));
         out.put("posts", pagePendingPosts(1, n));
-        out.put("replies", pagePendingReplies(1, n));
+        out.put("replies", pagePendingReplies(me, 1, n));
         out.put("claims", claimService.pageArbitration(1, n));
         return out;
     }
@@ -103,8 +103,11 @@ public class AdminGovernService {
         return new PageResult<>(page.getTotal(), page.getPages(), page.getCurrent(), page.getSize(), list);
     }
 
-    /** 回复审核队列：status=0 待审（M5 起回复也进先审后发） */
-    public PageResult<Map<String, Object>> pagePendingReplies(long pageNum, long pageSize) {
+    /** 回复审核队列：status=0 待审（M5 起回复也进先审后发）。
+     *  读权限与处置同闸（forum:audit）——M11 越权矩阵首跑抓出初版漏加 assert：
+     *  队列内容含未过审文本，泄露即"先审后发"形同虚设。 */
+    public PageResult<Map<String, Object>> pagePendingReplies(LoginUser me, long pageNum, long pageSize) {
+        assertAny(me, "forum:audit");
         Page<ForumReply> page = replyMapper.selectPage(new Page<>(pageNum, pageSize),
                 new LambdaQueryWrapper<ForumReply>()
                         .eq(ForumReply::getStatus, 0).orderByDesc(ForumReply::getId));
