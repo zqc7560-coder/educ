@@ -3,6 +3,7 @@
 import { computed } from 'vue'
 import { useRoute } from 'vue-router'
 import { useUserStore } from '@/stores/user'
+import BackBar from '@/components/BackBar.vue'
 
 const route = useRoute()
 const store = useUserStore()
@@ -35,7 +36,10 @@ const visible = computed(() =>
       <router-link v-for="m in visible" :key="m.path" :to="m.path"
                    :class="['menu', { on: on(m) }]">{{ m.label }}</router-link>
     </aside>
-    <section class="body"><router-view /></section>
+    <section class="body">
+      <BackBar v-if="route.path !== '/user'" fallback="/user" label="返回上一页或回到我的中心" />
+      <router-view />
+    </section>
   </div>
 </template>
 

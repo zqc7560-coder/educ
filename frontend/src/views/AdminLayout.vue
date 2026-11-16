@@ -9,6 +9,7 @@ import { useRoute, useRouter } from 'vue-router'
 import { ElMessage } from 'element-plus'
 import { logout as logoutApi } from '@/api/auth'
 import { useUserStore } from '@/stores/user'
+import BackBar from '@/components/BackBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -48,7 +49,12 @@ async function logout() {
         <el-button link size="small" @click="logout">退出</el-button>
       </div>
     </aside>
-    <main class="body"><router-view /></main>
+    <main class="body">
+      <div class="back-slot">
+        <BackBar v-if="route.path !== '/admin'" fallback="/admin" label="返回上一页或回到数据看板" />
+      </div>
+      <router-view />
+    </main>
   </div>
 </template>
 

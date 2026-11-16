@@ -10,6 +10,7 @@ import { ElMessage } from 'element-plus'
 import { logout as logoutApi } from '@/api/auth'
 import { activeBanners } from '@/api/common'
 import { useUserStore } from '@/stores/user'
+import BackBar from '@/components/BackBar.vue'
 
 const route = useRoute()
 const router = useRouter()
@@ -70,6 +71,9 @@ const goPublish = () => router.push('/user/items/new')
     </div>
 
     <main class="main">
+      <div v-if="route.path !== '/'" class="wrap back-slot">
+        <BackBar label="返回上一页或回到失物大厅" />
+      </div>
       <router-view />
     </main>
 
@@ -95,6 +99,7 @@ const goPublish = () => router.push('/user/items/new')
 .banner-inner { display: flex; align-items: center; gap: 10px; padding: 8px 0; }
 .banner-title { color: #b8860b; text-decoration: none; font-size: 14px; }
 .main { flex: 1; }
+.back-slot { padding-top: 14px; margin-bottom: -2px; }
 .foot { background: #fff; border-top: 1px solid #ebeef5; color: #909399; font-size: 13px; }
 .foot .wrap { padding: 16px 0; text-align: center; }
 </style>
