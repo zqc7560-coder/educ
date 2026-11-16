@@ -61,6 +61,15 @@ describe('resolveEnvelope: 统一响应体拆解', () => {
     expect(resolveEnvelope('<html>502</html>').authDead).toBe(false)
     expect(resolveEnvelope(null).ok).toBe(false)
   })
+
+  it('5xx 非信封响应文案直指"后端未就绪"（Docker 竞态退出实测坑，不许再含糊）', () => {
+    const r = resolveEnvelope('<html><head><title>502 Bad Gateway</title>', 502)
+    expect(r.ok).toBe(false)
+    expect(r.message).toContain('后端服务未就绪')
+    expect(r.message).toContain('502')
+    // 200 但非信封（如静态兜底 HTML）：保留格式异常语义
+    expect(resolveEnvelope('<html>ok</html>', 200).message).toContain('响应格式异常')
+  })
 })
 
 describe('auth.js: 令牌持久化', () => {

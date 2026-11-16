@@ -92,6 +92,9 @@ services:
     volumes:
       - uploads:/app/uploads
       - ./logs:/app/logs
+    # MySQL 卷首建期 healthcheck 存在"临时实例"误放行窗口，本容器可能抢跑连库失败退出；
+    # unless-stopped 让 Docker 在 5s 后自动重拉，DB 就绪后二次启动必然成功（实测竞态根治）。
+    restart: unless-stopped
     depends_on:
       mysql: { condition: service_healthy }
       redis: { condition: service_healthy }
@@ -123,6 +126,7 @@ services:
       - ../frontend/dist:/usr/share/nginx/html:ro
       # 与后端共享 uploads 卷：图片由后端写入、Nginx 直出（带缓存头）
       - uploads:/usr/share/nginx/uploads:ro
+    restart: unless-stopped
     depends_on:
       lf-server: { condition: service_healthy }
 

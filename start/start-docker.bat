@@ -49,13 +49,12 @@ if not exist "%LF_ROOT%\deploy\.env" (
 )
 cd /d "%LF_ROOT%\deploy"
 docker compose up -d --build
-rem 自愈：MySQL 卷首建时 entrypoint 有"临时实例→重启正式实例"窗口，
-rem healthcheck 可能在该窗口误放行，后端抢跑连库失败退出。再补一次 up 即恢复。
-docker compose ps --status exited --format "{{.Name}}" 2>nul | findstr lf-server >nul && (
-    echo [提示] 检测到后端首启竞态退出，10 秒后自动补起一次...
-    ping -n 11 127.0.0.1 >nul
-    docker compose up -d
-)
+rem 自愈（实测竞态）：MySQL 卷首建期 healthcheck 有"临时实例"误放行窗口，
+rem 后端可能抢跑失败——compose 首跑会因依赖报错退出，nginx 停在 Created。
+rem 后端容器已配 restart: unless-stopped 会自行重拉；这里无条件再补一次
+rem 幂等的 compose up -d，把没被拉起的 nginx 等剩余容器带上。
+ping -n 11 127.0.0.1 >nul
+docker compose up -d >nul 2>&1
 
 rem ---- 探活：经 nginx 打 /api/health（同时验证 nginx-反代-后端-库 全链）----
 echo 等待全栈健康（最长约 3 分钟，含首次镜像构建）...
@@ -66,7 +65,10 @@ ping -n 6 127.0.0.1 >nul
 set /a RETRY+=1
 curl -s --noproxy "*" -m 5 http://127.0.0.1:8088/api/health | findstr "overall" | findstr UP >nul && goto up
 if !RETRY! LSS 30 goto probe
-echo [警告] 未在时限内就绪。排障：docker compose ps 看容器状态；docker compose logs lf-server 看应用日志
+echo [警告] 未在时限内就绪。自动诊断：
+docker compose ps --format "table {{.Name}}	{{.Status}}"
+docker compose logs lf-server --tail 15
+echo 若上列为 Exited/Created，多为 MySQL 首建竞态，重跑本脚本即可
 pause & exit /b 1
 :up
 endlocal

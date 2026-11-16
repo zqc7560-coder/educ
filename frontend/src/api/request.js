@@ -25,7 +25,7 @@ export const AUTH_DEAD_CODES = [1001, 1004]
  * @param {{code:number, message:string, data:*}} body 统一响应体
  * @returns {{ok:boolean, payload?:*, authDead?:boolean}}
  */
-export function resolveEnvelope(body) {
+export function resolveEnvelope(body, status) {
   if (body && typeof body === 'object' && 'code' in body) {
     if (body.code === 0) {
       return { ok: true, payload: body.data }
@@ -36,8 +36,12 @@ export function resolveEnvelope(body) {
       message: body.message
     }
   }
-  // 非信封响应（如后端未就绪返回的原始文本）：视为失败但不跳登录
-  return { ok: false, authDead: false, message: '响应格式异常' }
+  // 非信封响应：网关/静态兜底回 HTML（502/500）多半是后端没起来或没起来完整；
+  // 文案必须指向"后端未就绪"而非含糊的"格式异常"，否则用户无从排查（答辩实测坑）
+  if (status != null && status >= 500) {
+    return { ok: false, authDead: false, message: `后端服务未就绪（HTTP ${status}），请确认启动脚本已跑完且容器全部 healthy` }
+  }
+  return { ok: false, authDead: false, message: '响应格式异常（非统一信封）' }
 }
 
 /** 跳转登录页：用 location 硬跳，避免 api 层反向 import router 造成循环依赖 */
@@ -63,7 +67,7 @@ service.interceptors.request.use((config) => {
 
 service.interceptors.response.use(
   (response) => {
-    const r = resolveEnvelope(response.data)
+    const r = resolveEnvelope(response.data, response.status)
     if (r.ok) return r.payload
     if (r.authDead) redirectToLogin()
     ElMessage.error(r.message || '请求失败')
@@ -74,8 +78,9 @@ service.interceptors.response.use(
   (error) => {
     // HTTP 层错误也优先尝试读信封（401/403/429 时后端仍返回统一结构）
     const body = error.response?.data
-    const r = body ? resolveEnvelope(body) : null
+    const r = body ? resolveEnvelope(body, error.response?.status) : null
     if (r?.authDead) redirectToLogin()
+    // 5xx 非信封（网关/静态兜底 HTML）→ 用 r.message 指路"后端未就绪"，不再一律"网络异常"
     ElMessage.error(r && !r.ok ? r.message : '网络异常，请稍后重试')
     if (r && !r.ok && body?.code != null) {
       return Promise.reject(Object.assign(error, { code: body.code, bizMessage: body.message }))
