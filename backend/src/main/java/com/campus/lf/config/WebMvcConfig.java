@@ -36,7 +36,11 @@ public class WebMvcConfig implements WebMvcConfigurer {
     @Override
     public void addCorsMappings(CorsRegistry registry) {
         registry.addMapping("/api/**")
-                .allowedOriginPatterns("http://localhost:5174", "http://127.0.0.1:5174")
+                // 端口通配而非写死 5174：经 nginx 反代（8088）时 Tomcat 构造的自身 origin
+                // 端口是内部 8081，浏览器 Origin 头与它不相等即被判跨域——同源部署形态下
+                // 这个"假跨域"必现（答辩实测：POST 登录/注册 403 Invalid CORS request）。
+                // 放行范围仍限本机+私有网段任意端口，公网来源继续被拒（安全清单不变）。
+                .allowedOriginPatterns("http://localhost:*", "http://127.0.0.1:*", "http://192.168.*:*")
                 .allowedMethods("GET", "POST", "PUT", "PATCH", "DELETE", "OPTIONS")
                 .allowedHeaders("*")
                 .allowCredentials(true)
