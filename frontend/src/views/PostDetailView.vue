@@ -24,6 +24,9 @@ const tree = ref([])
 const loading = ref(true)
 const canAudit = computed(() => (store.perms || []).includes('forum:audit'))
 const isAuthor = computed(() => post.value && store.user && post.value.userId === store.user.id)
+// 后端闸口径（点赞 5001/回复 5008/收藏 5008）：未发布帖不可互动——前端同步隐藏入口，
+// 免得用户点了才被拒（"看不到能操作的按钮"比"点了报错"更符合直觉）
+const isPublished = computed(() => post.value && post.value.status === 1)
 
 // 后端 TextCleaner 已剥标签入库；渲染再经 DOMPurify 消毒（XSS 双防线第二道）
 const safeHtml = (t) => DOMPurify.sanitize(String(t || '').replace(/\n/g, '<br>'))
@@ -136,11 +139,11 @@ const at = (r) => r.replyToNickname ? `@${r.replyToNickname} ：` : ''
           <span>{{ post.nickname }}</span>
           <span class="dim">{{ fmtTime(post.publishedAt || post.createdAt) }} · 阅读 {{ post.viewCount }}</span>
           <div class="ops">
-            <el-button size="small" :type="post.liked ? 'primary' : 'default'" @click="doLike">
+            <el-button v-if="isPublished" size="small" :type="post.liked ? 'primary' : 'default'" @click="doLike">
               {{ post.liked ? '👍 已赞' : '👍 点赞' }} {{ post.likeCount }}
             </el-button>
-            <el-button size="small" @click="doFav">☆ 收藏</el-button>
-            <el-button size="small" link type="warning" @click="report">举报</el-button>
+            <el-button v-if="isPublished" size="small" @click="doFav">☆ 收藏</el-button>
+            <el-button v-if="isPublished" size="small" link type="warning" @click="report">举报</el-button>
           </div>
         </div>
         <div class="body" v-html="safeHtml(post.content)"></div>
@@ -162,7 +165,8 @@ const at = (r) => r.replyToNickname ? `@${r.replyToNickname} ：` : ''
       <section class="replies">
         <h3>回复（{{ post.replyCount }}）</h3>
         <div class="newreply">
-          <el-button type="primary" plain @click="openReply(null)">发表评论</el-button>
+          <el-button v-if="isPublished" type="primary" plain @click="openReply(null)">发表评论</el-button>
+          <span v-else class="dim">帖子未通过审核，暂不可互动</span>
         </div>
 
         <div v-for="root in tree" :key="root.id" class="root">

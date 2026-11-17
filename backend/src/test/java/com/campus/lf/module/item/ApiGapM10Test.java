@@ -77,6 +77,40 @@ class ApiGapM10Test {
         return envelope(r).path("data").path("id").asLong();
     }
 
+    private long createPost(String token, String title) throws Exception {
+        MvcResult r = mockMvc.perform(post("/api/forum/posts").header("Authorization", "Bearer " + token)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"boardId\":11,\"title\":\"" + title + "\",\"content\":\"收藏闸测试正文\"}"))
+                .andExpect(jsonPath("$.code").value(0)).andReturn();
+        return envelope(r).path("data").path("id").asLong();
+    }
+
+    @Test
+    @DisplayName("收藏帖子状态闸：待审帖 5008 拒收藏；过审后可收藏；不存在帖 5001（与点赞/回复同口径）")
+    void favoritePostGate() throws Exception {
+        String stu = login(STU_A);
+        String mgr = login(MGR);
+        long postId = createPost(stu, "收藏闸样本帖");
+        // 待审态（forum_audit=1 种子默认）：作者自己也不许收藏
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"POST\",\"targetId\":" + postId + "}"))
+                .andExpect(jsonPath("$.code").value(BizCode.POST_STATUS_INVALID.getCode()));
+        // 审核通过后放行
+        mockMvc.perform(patch("/api/forum/posts/" + postId + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"POST\",\"targetId\":" + postId + "}"))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+        // 不存在帖子：404/5001（防孤儿键，与收藏不存在物品同纪律）
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"POST\",\"targetId\":999998}"))
+                .andExpect(jsonPath("$.code").value(BizCode.POST_NOT_FOUND.getCode()));
+    }
+
     @Test
     @DisplayName("/api/items/mine 必须是路由而非被 /{id} 吞（UI 首测 500 回归钉）")
     void mineRoute() throws Exception {

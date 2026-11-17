@@ -31,9 +31,12 @@ public class FavoriteController {
 
     public static final String TYPE_ITEM = "ITEM";
     public static final String TYPE_POST = "POST";
+    /** 帖子已发布态（与 ForumService.STATUS_PUBLISHED 对齐；收藏闸口径=点赞/回复同款） */
+    private static final int POST_STATUS_PUBLISHED = 1;
 
     private final UserFavoriteMapper favoriteMapper;
     private final LostItemMapper itemMapper;
+    private final com.campus.lf.module.forum.mapper.ForumPostMapper postMapper;
 
     /** POST /api/favorites/toggle {targetType,targetId} → {favorited: 操作后状态} */
     @Operation(summary = "收藏/取消收藏（幂等 toggle）")
@@ -58,6 +61,17 @@ public class FavoriteController {
         if (existing != null) {
             favoriteMapper.deleteById(existing.getId());
             return Result.ok(Map.of("favorited", false));
+        }
+        // 新增收藏才过状态闸（取消收藏不受限）：未发布（待审/下架）的帖子不可收藏——
+        // 与点赞(5001)/回复(5008)同口径，防"作者自己收藏待审帖养权重"与列表反查空行
+        if (TYPE_POST.equals(targetType)) {
+            com.campus.lf.module.forum.entity.ForumPost post = postMapper.selectById(targetId);
+            if (post == null) {
+                throw new BizException(BizCode.POST_NOT_FOUND, BizCode.POST_NOT_FOUND.getMessage(), 404);
+            }
+            if (post.getStatus() != POST_STATUS_PUBLISHED) {
+                throw new BizException(BizCode.POST_STATUS_INVALID, "帖子未发布，暂不可收藏");
+            }
         }
         UserFavorite f = new UserFavorite();
         f.setUserId(me.getUserId());

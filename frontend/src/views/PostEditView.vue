@@ -34,22 +34,42 @@ onMounted(async () => {
   }
 })
 
+const pending = ref([])   // 两段式：选图先留浏览器内存，提交才上传服务器
 async function pickImages(e) {
   const picked = Array.from(e.target.files || [])
+  e.target.value = ''
   if (!picked.length) return
-  if (imageUrls.value.length + picked.length > 9) return ElMessage.warning('最多 9 张图')
-  try {
-    const r = await uploadImages(picked, 'forum')
-    imageUrls.value.push(...(r.urls || []))
-  } catch { /* toast */ }
+  if (imageUrls.value.length + pending.value.length + picked.length > 9)
+    return ElMessage.warning('最多 9 张图')
+  for (const f of picked) {
+    if (!/^image\//.test(f.type)) { ElMessage.warning(`${f.name} 不是图片`); continue }
+    if (f.size > 5 * 1024 * 1024) { ElMessage.warning(`${f.name} 超过 5MB`); continue }
+    pending.value.push({ file: f, url: URL.createObjectURL(f) })
+  }
 }
 const removeImg = (i) => imageUrls.value.splice(i, 1)
+function dropPending(i) {
+  URL.revokeObjectURL(pending.value[i].url)
+  pending.value.splice(i, 1)
+}
 
 async function submit() {
   if (!form.boardId) return ElMessage.warning('请选择板块')
   if (!form.title.trim()) return ElMessage.warning('请填写标题')
   if (!form.content.trim()) return ElMessage.warning('请填写正文')
   submitting.value = true
+  // 提交闸：此刻才真上传内存选图，换回服务器路径并入 imageUrls
+  try {
+    if (pending.value.length) {
+      const r = await uploadImages(pending.value.map((p) => p.file), 'forum')
+      imageUrls.value.push(...(r.urls || []))
+      pending.value.forEach((p) => URL.revokeObjectURL(p.url))
+      pending.value = []
+    }
+  } catch {
+    submitting.value = false
+    return   // 上传失败=不发帖，内存选图保留可重试
+  }
   try {
     if (isEdit.value) {
       await updatePost(id.value, { ...form, imageUrls: imageUrls.value, version: version.value })
@@ -87,11 +107,16 @@ async function submit() {
               <img :src="safeSrc(u)" alt="" />
               <button class="del" @click.prevent="removeImg(imageUrls.indexOf(u))">×</button>
             </div>
-            <label v-if="imageUrls.length < 9" class="up">
+            <div v-for="(p, i) in pending" :key="p.url" class="thumb">
+              <img :src="p.url" alt="" />
+              <button class="del" @click.prevent="dropPending(i)">×</button>
+            </div>
+            <label v-if="imageUrls.length + pending.length < 9" class="up">
               <input type="file" accept="image/*" multiple hidden @change="pickImages" />
               <span>＋</span>
             </label>
           </div>
+          <div class="dim">点发布时才上传服务器（{{ imageUrls.length + pending.length }}/9）</div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="submit">{{ isEdit ? '保存' : '发布' }}</el-button>
@@ -112,4 +137,5 @@ h2 { margin: 0 0 16px; font-size: 18px; }
 .del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: #f56c6c; color: #fff; cursor: pointer; }
 .up { width: 92px; height: 92px; border: 1px dashed #c0c4cc; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #909399; font-size: 26px; }
 .up:hover { border-color: #409eff; color: #409eff; }
+.dim { color: #909399; font-size: 12px; }
 </style>

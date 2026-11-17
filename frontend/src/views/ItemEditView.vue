@@ -4,7 +4,10 @@
  *
  * 与后端契约逐条对齐：FOUND 必带核验问题（2003 后端拒，前端先拦省往返）；
  * type 编辑态锁死（后端禁改，翻转会让在途认领单语义坍塌）；编辑必带 version；
- * 图片走"先传后贴"：uploadImages 得 /uploads 相对路径再随表单提交。
+ * 图片两段式（用户口径：没点发布/保存，服务器不该收下图片）：
+ * 选图只在浏览器内存暂存 File + objectURL 本地预览；submit 时才批量
+ * uploadImages 换回 /uploads 路径随表单一起提交。取消/离开页即丢弃，
+ * 服务器零垃圾文件。编辑态已有图仍在 imageUrls 里，删除仅影响提交载荷。
  */
 import { ref, reactive, computed, onMounted } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
@@ -53,17 +56,24 @@ async function load() {
 }
 onMounted(load)
 
-const files = ref([])
+const pending = ref([])   // 两段式：选图先留在浏览器内存（{file, url}），提交才上传
 async function pickImages(e) {
   const picked = Array.from(e.target.files || [])
+  e.target.value = ''
   if (!picked.length) return
-  if (form.imageUrls.length + picked.length > 9) return ElMessage.warning('最多 9 张')
-  try {
-    const r = await uploadImages(picked, 'items')
-    form.imageUrls.push(...(r.urls || []))
-  } catch { /* 拦截器 toast */ }
+  if (form.imageUrls.length + pending.value.length + picked.length > 9)
+    return ElMessage.warning('最多 9 张')
+  for (const f of picked) {
+    if (!/^image\//.test(f.type)) { ElMessage.warning(`${f.name} 不是图片`); continue }
+    if (f.size > 5 * 1024 * 1024) { ElMessage.warning(`${f.name} 超过 5MB`); continue }
+    pending.value.push({ file: f, url: URL.createObjectURL(f) })
+  }
 }
 function removeImg(i) { form.imageUrls.splice(i, 1) }
+function dropPending(i) {
+  URL.revokeObjectURL(pending.value[i].url)
+  pending.value.splice(i, 1)
+}
 
 async function submit() {
   if (!form.title.trim()) return ElMessage.warning('请填写标题')
@@ -74,6 +84,20 @@ async function submit() {
     return ElMessage.warning('招领信息必须设置核验问题（防冒领）')
 
   submitting.value = true
+  // 两段式提交闸：此刻才把内存里的选图真上传，换回服务器路径并入 imageUrls
+  try {
+    if (pending.value.length) {
+      const r = await uploadImages(pending.value.map((p) => p.file), 'items')
+      const urls = r.urls || []
+      form.imageUrls.push(...urls)
+      pending.value.forEach((p) => URL.revokeObjectURL(p.url))
+      pending.value = []
+      if (urls.length) ElMessage.info('图片已随发布上传')
+    }
+  } catch {
+    submitting.value = false
+    return   // 上传失败=不发布（拦截器已 toast），内存选图保留可重试
+  }
   const body = {
     type: form.type, title: form.title.trim(), description: form.description.trim(),
     categoryId: form.categoryId, campusId: form.campusId || undefined,
@@ -159,12 +183,16 @@ async function submit() {
               <img :src="safeSrc(u)" alt="" />
               <button class="del" @click.prevent="removeImg(i)">×</button>
             </div>
-            <label v-if="form.imageUrls.length < 9" class="up">
+            <div v-for="(p, i) in pending" :key="p.url" class="thumb">
+              <img :src="p.url" alt="" />
+              <button class="del" @click.prevent="dropPending(i)">×</button>
+            </div>
+            <label v-if="form.imageUrls.length + pending.length < 9" class="up">
               <input type="file" accept="image/*" multiple hidden @change="pickImages" />
               <span>＋</span>
             </label>
           </div>
-          <div class="cnt">{{ form.imageUrls.length }}/9 张（png/jpg/gif/webp，≤5MB）</div>
+          <div class="cnt">{{ form.imageUrls.length + pending.length }}/9 张（png/jpg/gif/webp，≤5MB；点发布时才上传服务器）</div>
         </el-form-item>
 
         <el-form-item>

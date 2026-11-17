@@ -22,7 +22,9 @@ export function deletePost(id) {
   return request.delete(`/forum/posts/${id}`)
 }
 export function changePostStatus(id, target, reason) {
-  return request.patch(`/forum/posts/${id}/status`, reason ? { reason } : null, { params: { target } })
+  // 必须恒发 JSON 对象：axios 对 null data 会按默认头发成 x-www-form-urlencoded，
+  // 后端 @RequestBody 解析器对该接口直接 415→500（审核"通过"按钮实测炸点）
+  return request.patch(`/forum/posts/${id}/status`, { reason: reason ?? undefined }, { params: { target } })
 }
 export function togglePostTop(id) {
   return request.post(`/forum/posts/${id}/top`)

@@ -29,17 +29,44 @@ async function saveProfile() {
   } catch { /* toast */ }
 }
 
-async function pickAvatar(e) {
+/**
+ * 头像两段式（用户口径：选了图≠上传服务器，必须点"更换头像"才提交）：
+ * onPick 只本地暂存 File 并给即时预览；doUpload 才真发 multipart。
+ * 未提交时点"取消"或换页丢弃，服务器不留垃圾文件。
+ */
+const picked = ref(null)
+const previewUrl = ref('')
+const uploading = ref(false)
+
+function onPick(e) {
   const f = (e.target.files || [])[0]
+  e.target.value = ''   // 允许重复选同一文件仍触发 change
   if (!f) return
+  if (!/^image\//.test(f.type)) return ElMessage.warning('只能选择图片文件')
+  if (f.size > 5 * 1024 * 1024) return ElMessage.warning('图片不能超过 5MB')
+  if (picked.value) URL.revokeObjectURL(previewUrl.value)
+  picked.value = f
+  previewUrl.value = URL.createObjectURL(f)
+}
+
+async function doUpload() {
+  if (!picked.value) return
+  uploading.value = true
   const fd = new FormData()
-  fd.append('file', f)
+  fd.append('file', picked.value)
   try {
     const u = await request.post('/users/avatar', fd)
     avatar.value = u.avatar || ''
     store.applyLogin(store.token, u)
     ElMessage.success('头像已更新')
-  } catch { /* 4001/4002 拦截器 toast */ }
+    cancelPick()
+  } catch { /* 4001/4002 拦截器 toast */ } finally { uploading.value = false }
+}
+
+function cancelPick() {
+  if (picked.value && previewUrl.value) URL.revokeObjectURL(previewUrl.value)
+  picked.value = null
+  previewUrl.value = ''
 }
 
 const pwd = reactive({ oldPassword: '', newPassword: '', confirm: '' })
@@ -61,12 +88,18 @@ async function changePwd() {
     <div class="panel">
       <h3>个人资料</h3>
       <div class="ava-row">
-        <el-avatar :size="64" :src="avatar || undefined">{{ (profile.nickname || '我')[0] }}</el-avatar>
-        <label class="up">
-          <input type="file" accept="image/*" hidden @change="pickAvatar" />
-          <el-button size="small">更换头像</el-button>
-        </label>
-        <span class="dim">png/jpg 等，≤5MB</span>
+        <el-avatar :size="64" :src="(picked ? previewUrl : avatar) || undefined">{{ (profile.nickname || '我')[0] }}</el-avatar>
+        <template v-if="!picked">
+          <label class="up">
+            <input type="file" accept="image/*" hidden @change="onPick" />
+            <el-button size="small">选择图片</el-button>
+          </label>
+        </template>
+        <template v-else>
+          <el-button size="small" type="primary" :loading="uploading" @click="doUpload">确认更换</el-button>
+          <el-button size="small" @click="cancelPick">取消</el-button>
+        </template>
+        <span class="dim">png/jpg 等，≤5MB；选图后须点「确认更换」才会上传服务器</span>
       </div>
       <el-form label-width="70px" style="max-width:420px">
         <el-form-item label="学号"><el-input :model-value="store.user?.studentNo" disabled /></el-form-item>
