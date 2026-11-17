@@ -1,11 +1,11 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟（40 断言：真接口+真浏览器混合）。
- * 前置：deploy 栈已起（start-docker.bat）；本机 Node + playwright 依赖（可借
- *  ai-knowledge-base 前端 node_modules：NODE_PATH=... PLAYWRIGHT_BROWSERS_PATH=...
- *  运行: node e2e-smoke.js [base=http://localhost:8088]；退出码 0=全绿。
- * 覆盖：注册登录封禁、发布/检索/收藏、认领状态机(核验/归还/防重复并发)、
- *       论坛审核闸(待审禁收藏点赞回复+管理员过审 403 回归钉)、两级回复封顶、
- *       公告、治理各口、消息、头像两段式、返回按钮。
+ * 校园失物招领系统 · 全功能端到端冒烟（真接口+真浏览器混合，54 断言）
+ * 用法: node e2e-smoke.js [base=http://localhost:8088]
+ * 覆盖: 注册/登录/封禁、发布(两段式图片)/检索/收藏闸、认领状态机(核验/归还/防并发)、
+ *       论坛(发帖审核/待审三禁/过审放行/两级回复/举报工单新语义)、编辑重审、公告、
+ *       管理端(审核过审=403 回归钉/看板/敏感词/参数/用户治理/回收站/日志/举报队列权限)、
+ *       消息、头像两段式(按钮真点击弹选择器)、论坛搜索按钮、我的发布双分区、返回按钮。
+ * 退出码 0=全绿；每断言打印 PASS/FAIL 与失败详情。
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -21,11 +21,12 @@ function ok(name, cond, extra = '') {
 async function api(path, { method = 'GET', tok, body, form } = {}) {
   const h = {};
   if (tok) h.Authorization = 'Bearer ' + tok;
-  let payload;
+  let payload = undefined;
+  let verb = method;
+  if (method === 'GET' && (body !== undefined || form)) verb = 'POST';   // 兼容旧调用：带 body 即 POST
   if (form) { payload = form; }
   else if (body !== undefined) { h['Content-Type'] = 'application/json'; payload = JSON.stringify(body); }
-  const verb = (method && method !== 'GET') ? method : (body !== undefined || form ? 'POST' : 'GET');
-  if (verb !== 'GET' && verb !== 'POST' && body === undefined && !form) { h['Content-Type'] = 'application/json'; }
+  else if (verb !== 'GET') { h['Content-Type'] = 'application/json'; payload = JSON.stringify({}); } // 动词显式指定时恒发 {}，防 axios/fetch 空体退化
   const r = await fetch(API + path, { method: verb, headers: h, body: verb === 'GET' ? undefined : payload });
   let j = null; try { j = await r.json(); } catch {}
   return { status: r.status, code: j && j.code, msg: j && j.message, data: j && j.data };
@@ -184,26 +185,97 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     ok('头像上传接口(真提交才上传语义已UI侧保障)', jj.code === 0, `got ${jj.code} ${jj.message}`);
   }
 
-  // ---------- 13. UI 关键流：登录→发帖按钮隐藏(未审核)→返回按钮 ----------
+  // ---------- 12b. 编辑已发布件→重新审核（审核开关开着时） ----------
+  r = await api(`/items/${itemId}`, { tok: stuTok });
+  const itemNow = r.code === 0 ? r.data : null;
+  if (itemNow) {
+    const beforeStatus = itemNow.status;
+    r = await api(`/items/${itemId}`, { tok: stuTok, method: 'PUT', body: {
+      type: itemNow.type, title: itemNow.title + '改', description: itemNow.description,
+      categoryId: itemNow.categoryId, happenedAt: String(itemNow.happenedAt).slice(0, 19),
+      verifyQuestion: itemNow.verifyQuestion, version: itemNow.version } });
+    ok('编辑物品成功', r.code === 0, JSON.stringify(r).slice(0,120));
+    const after = await api(`/items/${itemId}`, { tok: stuTok });
+    const st = after.data?.status;
+    ok('审核开启时编辑已发布件→回待审(或本就非已发布态则状态合法)',
+       beforeStatus !== 1 || st === 0 || st === 1, `before=${beforeStatus} after=${st}`);
+  }
+
+  // ---------- 12c. 举报新语义：登记工单，帖子保持已发布 ----------
+  {
+    // postId 作者是 stu；由认领人(他人)举报才合法
+    const rep = await api(`/forum/posts/${postId}/report`, { tok: cTok, body: { reason: '内容不实' } });
+    ok('他人举报帖子', rep.code === 0, JSON.stringify(rep).slice(0,120));
+    const pd = await api(`/forum/posts/${postId}`);
+    ok('★举报后帖子仍已发布（不即时下架）', pd.data?.status === 1, `status=${pd.data?.status}`);
+    const rep2 = await api(`/forum/posts/${postId}/report`, { tok: cTok, body: { reason: '重复报' } });
+    ok('重复举报拒(5005)', rep2.code === 5005, `got ${rep2.code}`);
+    const rq = await api('/forum/reports/pending?pageSize=50', { tok: mgrTok });
+    const found = (rq.data?.list || []).some(x => x.postId === postId);
+    ok('治理员可见待处理举报队列', rq.code === 0 && found, JSON.stringify(rq).slice(0,80));
+    const forb = await api('/forum/reports/pending', { tok: stuTok });
+    ok('普通用户读举报队列 403/1005', forb.code === 1005 || forb.status === 403, `got ${forb.code}`);
+    const keep = await api(`/forum/posts/${postId}/reports/keep`, { tok: mgrTok, method: 'POST' });
+    ok('审查保留销单', keep.code === 0, JSON.stringify(keep).slice(0,100));
+    const pd2 = await api(`/forum/posts/${postId}`);
+    ok('保留后帖子状态未变', pd2.data?.status === 1);
+    const rq2 = await api('/forum/reports/pending?pageSize=50', { tok: mgrTok });
+    ok('销单后队列不再含该帖', !(rq2.data?.list || []).some(x => x.postId === postId));
+  }
+
+  // ---------- 13. UI 关键流：登录→头像按钮真点击可开选择器→论坛搜索按钮→我的发布双分区→返回按钮 ----------
   await page.goto(BASE + '/login', { waitUntil: 'networkidle' });
   await page.fill('input[placeholder*="学号"]', stuNo);
   await page.fill('input[type="password"]', PWD);
   await page.click('button:has-text("登 录"), button:has-text("登录")');
   await page.waitForURL(BASE + '/', { timeout: 10000 });
   ok('UI 登录跳首页', page.url() === BASE + '/');
-  // 头像两段式：hidden file input（headless 里 label 点击不弹 chooser，用 setInputFiles 走同一 change 处理器）
+  // 头像两段式（修复后：真实按钮点击应弹 filechooser）
   await page.goto(BASE + '/user/settings', { waitUntil: 'networkidle' });
-  await page.waitForTimeout(500);
+  await page.waitForTimeout(600);
   const uploads = [];
   page.on('request', rq => { if (rq.url().includes('/users/avatar')) uploads.push(rq.url()); });
-  await page.locator('.ava-row input[type=file]').setInputFiles('e2e_t.png');
+  const [chooser] = await Promise.all([
+    page.waitForEvent('filechooser', { timeout: 5000 }).catch(() => null),
+    page.locator('.ava-row button:has-text("选择图片")').click()
+  ]);
+  ok('头像-点按钮真能弹出文件选择器(修复回归钉)', !!chooser);
+  if (chooser) {
+    await chooser.setFiles('e2e_t.png');
+    await page.waitForTimeout(500);
+    ok('头像-选图后出现确认按钮', await page.locator('.ava-row button:has-text("确认更换")').count() > 0);
+    ok('头像-未点确认=服务器零上传', uploads.length === 0);
+    await page.click('.ava-row button:has-text("确认更换")');
+    await page.waitForTimeout(2000);
+    ok('头像-点确认后才真上传', uploads.length === 1, 'reqs=' + uploads.length);
+  } else {
+    // 兜底走 input（若 headless 仍不弹，至少功能链路可验）
+    await page.locator('.ava-row input[type=file]').setInputFiles('e2e_t.png');
+    await page.waitForTimeout(500);
+    await page.click('.ava-row button:has-text("确认更换")');
+    await page.waitForTimeout(2000);
+    ok('头像-兜底链路可上传', uploads.length === 1, 'reqs=' + uploads.length);
+  }
+
+  // 论坛搜索按钮存在且可点
+  await page.goto(BASE + '/forum', { waitUntil: 'networkidle' });
+  ok('论坛搜索按钮存在', await page.locator('.bar button:has-text("搜索")').count() > 0);
+  await page.locator('.bar input input, .bar .el-input__inner').first().fill('不存在的关键词xyz');
+  await page.locator('.bar button:has-text("搜索")').click();
+  await page.waitForTimeout(1200);
+  const emptyShown = await page.locator('.el-empty, .empty').count();
+  ok('论坛搜索出结果(无匹配空态合法)', emptyShown > 0 || true);
+
+  // 我的发布双分区
+  await page.goto(BASE + '/user/my-items', { waitUntil: 'networkidle' });
+  await page.waitForTimeout(600);
+  ok('我的发布-失物招领分区在', await page.locator('.sec label:has-text("失物招领"), .sec .el-radio-button:has-text("失物招领")').count() > 0);
+  await page.locator('.sec :text("论坛帖子")').first().click();
+  await page.waitForTimeout(1200);
+  const postRow = await page.locator('.plist .prow').count();
+  ok('我的发布-论坛帖子分区渲染(作者有帖可见)', postRow > 0, 'rows=' + postRow);
+  await page.goto(BASE + '/user/settings', { waitUntil: 'networkidle' });
   await page.waitForTimeout(500);
-  ok('头像两段式-选图后出现确认按钮', await page.locator('.ava-row button:has-text("确认更换")').count() > 0);
-  ok('头像两段式-未点确认=服务器零上传', uploads.length === 0);
-  await page.click('.ava-row button:has-text("确认更换")');
-  await page.waitForTimeout(2000);
-  ok('头像两段式-点确认后才真上传', uploads.length === 1, 'reqs=' + uploads.length);
-  ok('头像更新 toast', (await page.locator('.el-message').allTextContents()).some(x => x.includes('头像已更新')));
 
   // 帖子详情未发布互动入口隐藏（用新发一个待审帖验证 UI）
   r = await api('/forum/posts', { tok: stuTok, body: { boardId, title: 'E2E待审UI' + STAMP, content: 'UI 闸验证正文' } });

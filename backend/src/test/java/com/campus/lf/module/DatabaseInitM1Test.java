@@ -38,7 +38,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  *       与 H2 信息模式实有列做双向差集——实体多列（DDL 忘同步）与表多列（实体漏字段）
  *       都当场红。生产 schema 与 H2 schema 的漂移由测试加载的正是 H2 版这一事实
  *       + 两侧脚本同源维护纪律兜住；</li>
- *   <li><b>22 表齐全</b>：信息模式数表；</li>
+ *   <li><b>23 表齐全</b>：信息模式数表；</li>
  *   <li><b>种子矩阵</b>：角色 3/权限 13/授权矩阵条数/分类 6+板块 3/校区 2 楼栋 4/
  *       参数 7/公告 1/敏感词 3——口径与 data-h2.sql 逐条对齐；</li>
  *   <li><b>Key 红线</b>：种子里不得出现 sk- 等真实密钥形态（本项目无 AI Key，
@@ -47,7 +47,7 @@ import static org.assertj.core.api.Assertions.assertThat;
  */
 @SpringBootTest
 @ActiveProfiles("test")
-@DisplayName("M1: 22表结构与种子契约")
+@DisplayName("M1: 23表结构与种子契约")
 class DatabaseInitM1Test {
 
     /** 实体清单：module→类（与 db/mysql/schema.sql 22 表一一对应；LostItem 手写其余生成器批量） */
@@ -68,6 +68,7 @@ class DatabaseInitM1Test {
             com.campus.lf.module.forum.entity.ForumReply.class,
             com.campus.lf.module.forum.entity.ForumLike.class,
             com.campus.lf.module.forum.entity.UserFavorite.class,
+            com.campus.lf.module.forum.entity.PostReport.class,
             com.campus.lf.module.announce.entity.Announcement.class,
             com.campus.lf.module.announce.entity.AnnouncementImage.class,
             com.campus.lf.module.notice.entity.Notification.class,
@@ -83,7 +84,7 @@ class DatabaseInitM1Test {
     private JdbcTemplate jdbcTemplate;
 
     @Test
-    @DisplayName("22 表齐全（信息模式数表）")
+    @DisplayName("23 表齐全（信息模式数表）")
     void allTablesExist() {
         Set<String> actual = new HashSet<>(jdbcTemplate.queryForList(
                 "select table_name from information_schema.tables where table_schema='PUBLIC'",
@@ -92,10 +93,10 @@ class DatabaseInitM1Test {
                 "sys_user", "sys_role", "sys_user_role", "sys_permission", "sys_role_permission",
                 "category", "campus_area", "lost_item", "item_image",
                 "item_claim", "claim_log",
-                "forum_post", "post_image", "forum_reply", "forum_like", "user_favorite",
+                "forum_post", "post_image", "forum_reply", "forum_like", "user_favorite", "post_report",
                 "announcement", "announcement_image",
                 "notification", "sensitive_word", "sys_config", "operation_log"));
-        assertThat(expected).hasSize(22);
+        assertThat(expected).hasSize(23);
         assertThat(actual).containsAll(expected);
     }
 

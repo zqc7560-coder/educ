@@ -284,6 +284,14 @@ public class ItemService {
         if (dto.getImageUrls() != null) {
             rebuildImages(id, dto.getImageUrls());
         }
+        // 编辑即重审（与论坛帖同口径）：先审后发开着时，已发布件被作者改动后回待审——
+        // 防"先养一条合规内容过审、再改成违规"的攻击路径；待审/下架件本就不公开，不动状态
+        if (isAuditOn() && item.getStatus() == STATUS_PUBLISHED) {
+            LostItem reaudit = new LostItem();
+            reaudit.setId(id);
+            reaudit.setStatus(STATUS_PENDING);
+            itemMapper.updateById(reaudit);
+        }
         cache.evictTx(id);
     }
 

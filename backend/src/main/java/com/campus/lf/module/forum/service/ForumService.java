@@ -16,6 +16,7 @@ import com.campus.lf.module.forum.entity.ForumLike;
 import com.campus.lf.module.forum.entity.ForumPost;
 import com.campus.lf.module.forum.entity.ForumReply;
 import com.campus.lf.module.forum.entity.PostImage;
+import com.campus.lf.module.forum.entity.PostReport;
 import com.campus.lf.module.forum.mapper.ForumLikeMapper;
 import com.campus.lf.module.forum.mapper.ForumPostMapper;
 import com.campus.lf.module.forum.mapper.ForumReplyMapper;
@@ -87,12 +88,14 @@ public class ForumService {
     private final ForumPostMapper postMapper;
     private final ForumReplyMapper replyMapper;
     private final ForumLikeMapper likeMapper;
+    private final com.campus.lf.module.forum.mapper.PostReportMapper reportMapper;
     private final PostImageMapper postImageMapper;
     private final SysUserMapper userMapper;
     private final SysConfigMapper configMapper;
     private final CategoryMapper categoryMapper;
     private final LostItemMapper itemMapper;          // 跨模块日限合计计数（只读）
     private final NotificationMapper notificationMapper;
+    private final org.springframework.jdbc.core.JdbcTemplate jdbcTemplate;
     private final SensitiveWordGate wordGate;
     private final org.springframework.data.redis.core.StringRedisTemplate redis;
 
@@ -281,6 +284,11 @@ public class ForumService {
             patch.setOfflineReason("");
         }
         postMapper.updateById(patch);
+        // 举报工单联动销单：下架=处置成立，恢复发布=审查保留（都回执举报人）
+        if ((target == STATUS_OFFLINE || target == STATUS_PUBLISHED)
+                && post.getStatus() != target) {
+            resolveReports(id, me.getUserId(), target == STATUS_OFFLINE);
+        }
         notify(post.getUserId(), "POST_AUDIT", id,
                 target == STATUS_PUBLISHED ? "帖子已通过审核" : "帖子状态更新",
                 "《" + post.getTitle() + "》" + (target == STATUS_PUBLISHED ? "已发布" :
@@ -499,13 +507,81 @@ public class ForumService {
         if (post.getStatus() != STATUS_PUBLISHED) {
             throw new BizException(BizCode.POST_NOT_FOUND, BizCode.POST_NOT_FOUND.getMessage(), 404);
         }
-        // 转回待审（进审核台队列）；理由先记应用日志（举报表留 P2，台账口径）
-        ForumPost patch = new ForumPost();
-        patch.setId(postId);
-        patch.setStatus(STATUS_PENDING);
-        postMapper.updateById(patch);
-        log.info("举报转审：post={} by uid={} 理由={}", postId, me.getUserId(),
-                reason == null ? "-" : reason.replaceAll("[\r\n]", " "));
+        // 举报=登记工单+通知治理员，**帖子状态不因举报改变**（旧"举报即转待审"已废弃：
+        // 个别举报不该让在线内容直接消失，管理员看过理由后自行决定下架或保留）
+        long dup = reportMapper.selectCount(new com.baomidou.mybatisplus.core.conditions.query
+                .LambdaQueryWrapper<PostReport>()
+                .eq(PostReport::getPostId, postId).eq(PostReport::getUserId, me.getUserId()));
+        if (dup > 0) {
+            throw new BizException(BizCode.REPORT_DUPLICATE);
+        }
+        PostReport rep = new PostReport();
+        rep.setPostId(postId);
+        rep.setUserId(me.getUserId());
+        rep.setReason(reason == null ? null : reason.replaceAll("[\\r\\n]", " "));
+        rep.setStatus(0);
+        rep.setCreatedAt(java.time.LocalDateTime.now());
+        rep.setDeleted(0);
+        try {
+            reportMapper.insert(rep);
+        } catch (org.springframework.dao.DuplicateKeyException e) {
+            throw new BizException(BizCode.REPORT_DUPLICATE);   // 并发双击：uk 兜底
+        }
+        String brief = rep.getReason() == null || rep.getReason().isBlank() ? "（未填理由）" : rep.getReason();
+        for (Long governor : governanceUserIds()) {
+            notify(governor, "REPORT_NEW", postId, "有帖子被举报待处理",
+                    "《" + post.getTitle() + "》被举报，理由：" + brief);
+        }
+        log.info("举报登记：post={} by uid={} 理由={}", postId, me.getUserId(), brief);
+    }
+
+    /** 持有论坛治理权限点的正常用户（举报通知对象）；三表 JOIN 一次查询，量小 */
+    public List<Long> governanceUserIds() {
+        return jdbcTemplate.queryForList(
+                "SELECT DISTINCT ur.user_id FROM sys_role_permission rp "
+                        + "JOIN sys_user_role ur ON ur.role_id = rp.role_id "
+                        + "JOIN sys_permission p ON p.id = rp.perm_id "
+                        + "JOIN sys_user u ON u.id = ur.user_id "
+                        + "WHERE p.perm_code IN ('forum:audit','forum:offline') AND u.status = 1 AND u.deleted = 0",
+                Long.class);
+    }
+
+    /** 待处理举报工单分页（审核台；治理员可读） */
+    public PageResult<Map<String, Object>> pagePendingReports(long pageNum, long pageSize) {
+        Page<PostReport> page = reportMapper.selectPage(new Page<>(pageNum, pageSize),
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PostReport>()
+                        .eq(PostReport::getStatus, 0).orderByDesc(PostReport::getId));
+        List<Map<String, Object>> list = page.getRecords().stream().map(r -> {
+            Map<String, Object> m = new java.util.HashMap<>();
+            m.put("id", r.getId());
+            m.put("postId", r.getPostId());
+            m.put("userId", r.getUserId());
+            m.put("reason", r.getReason());
+            m.put("createdAt", r.getCreatedAt());
+            ForumPost p = postMapper.selectById(r.getPostId());
+            m.put("postTitle", p == null ? "(帖子已删除)" : p.getTitle());
+            m.put("postStatus", p == null ? null : p.getStatus());
+            return m;
+        }).toList();
+        return new PageResult<>(page.getTotal(), page.getPages(), page.getCurrent(), page.getSize(), list);
+    }
+
+    /** 处置完成销单（管理员对帖执行下架/保留后调用）：工单置 1+回执举报人 */
+    @Transactional
+    public void resolveReports(Long postId, Long handlerId, boolean takenDown) {
+        List<PostReport> open = reportMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<PostReport>()
+                        .eq(PostReport::getPostId, postId).eq(PostReport::getStatus, 0));
+        for (PostReport r : open) {
+            PostReport patch = new PostReport();
+            patch.setId(r.getId());
+            patch.setStatus(1);
+            patch.setHandledAt(java.time.LocalDateTime.now());
+            reportMapper.updateById(patch);
+            notify(r.getUserId(), "REPORT_RESULT", postId,
+                    takenDown ? "你举报的帖子已被下架" : "你举报的帖子经审查保留",
+                    "感谢你的监督，管理员已对该帖完成处置。");
+        }
     }
 
     // ==================================================================

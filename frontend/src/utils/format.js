@@ -51,6 +51,8 @@ export const NOTIFY_META = {
   REPLY: { label: '回复/@我', to: (bizId) => `/forum/${bizId}` },
   LIKE: { label: '帖子被赞', to: (bizId) => `/forum/${bizId}` },
   POST_AUDIT: { label: '帖子审核', to: (bizId) => `/forum/${bizId}` },
+  REPORT_NEW: { label: '举报待处理', to: (bizId) => `/admin/audit` },
+  REPORT_RESULT: { label: '举报处置结果', to: (bizId) => `/forum/${bizId}` },
   SYSTEM: { label: '系统通知', to: () => null }
 }
 

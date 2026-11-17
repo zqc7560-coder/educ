@@ -136,6 +136,17 @@ class CacheApiM9Test {
                         .contentType(MediaType.APPLICATION_JSON).content(om.writeValueAsString(edit)))
                 .andExpect(jsonPath("$.code").value(0));
         assertThat(cache.getDetail(id)).as("evictTx 已删详情键").isNull();
+        // 新语义（编辑即重审）：item_audit=1 时作者改动已发布件→回待审，游客不可见；
+        // 作者视角先核状态与新标题，再走审核过审后游客才读到"正规改名"
+        JsonNode ownerView = envelope(mockMvc.perform(get("/api/items/" + id)
+                .header("Authorization", "Bearer " + stu)).andReturn());
+        assertThat(ownerView.path("data").path("status").asInt())
+                .as("编辑即重审：已发布件被改动后回待审").isEqualTo(0);
+        assertThat(ownerView.path("data").path("title").asText()).isEqualTo("正规改名");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + login(STU_B)))
+                .andExpect(jsonPath("$.code").value(0));
         JsonNode third = envelope(mockMvc.perform(get("/api/items/" + id)).andReturn());
         assertThat(third.path("data").path("title").asText()).isEqualTo("正规改名");
 

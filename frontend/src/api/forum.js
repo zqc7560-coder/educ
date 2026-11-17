@@ -29,6 +29,12 @@ export function changePostStatus(id, target, reason) {
 export function togglePostTop(id) {
   return request.post(`/forum/posts/${id}/top`)
 }
+export function pendingReports(params) {
+  return request.get('/forum/reports/pending', { params })
+}
+export function keepReportedPost(id) {
+  return request.post(`/forum/posts/${id}/reports/keep`)
+}
 
 export function fetchReplyTree(postId) {
   return request.get(`/forum/posts/${postId}/replies`)

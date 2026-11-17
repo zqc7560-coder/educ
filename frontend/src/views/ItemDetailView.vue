@@ -79,7 +79,7 @@ async function reject(c) {
   } catch { /* 用户取消 */ }
 }
 const confirm = (c) => act(() => ElMessageBox.confirm(
-  `确认把「${item.value.title}」归还给 ${c.claimantNickname}？确认后物品下架，其余在途申请自动关闭。`,
+  `确认把「${item.value.title}」归还给 ${c.claimantNickname}？确认后物品下架。`,
   '确认归还', { type: 'warning' }).then(() => confirmReturn(c.id)), '已确认归还，物品下架')
 const arb = (c) => act(() => applyArbitration(c.id), '已申请仲裁，等待管理员裁决')
 

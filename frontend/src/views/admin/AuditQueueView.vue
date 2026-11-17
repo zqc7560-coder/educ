@@ -8,12 +8,13 @@ import { useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
 import { auditQueue, pendingReplies, handleReply } from '@/api/admin'
 import { changeItemStatus } from '@/api/item'
-import { changePostStatus } from '@/api/forum'
+import { changePostStatus, pendingReports, keepReportedPost } from '@/api/forum'
 import { fmtTime } from '@/utils/format'
 
 const router = useRouter()
 const data = ref(null)
 const replies = ref([])
+const reports = ref([])
 const loading = ref(true)
 
 async function load() {
@@ -22,6 +23,8 @@ async function load() {
     data.value = await auditQueue(20)
     const p = await pendingReplies({ pageNum: 1, pageSize: 20 })
     replies.value = p.list || []
+    const rp = await pendingReports({ pageNum: 1, pageSize: 20 })
+    reports.value = rp.list || []
   } finally { loading.value = false }
 }
 onMounted(load)
@@ -46,6 +49,11 @@ async function postReject(p) {
   } catch { /* 取消 */ }
 }
 const replyPass = (r) => act(() => handleReply(r.id, 1), '回复已通过')
+const rptKeep = (r) => act(() => keepReportedPost(r.postId), '已保留帖子并销单（举报人已收到回执）')
+async function rptDown(r) {
+  const { value } = await ElMessageBox.prompt(`下架《${r.postTitle}》的理由`, '举报下架', { inputPlaceholder: '必填' })
+  await act(() => changePostStatus(r.postId, 2, value), '已下架并销举报单')
+}
 async function replyBlock(r) {
   try {
     const { value } = await ElMessageBox.prompt('屏蔽理由（作者可见）', '屏蔽回复', { inputPlaceholder: '必填' })
@@ -102,6 +110,28 @@ async function replyBlock(r) {
         </el-table-column>
       </el-table>
       <el-empty v-if="!(data?.posts?.list || []).length" :image-size="50" description="帖子队列清空了" />
+    </div>
+
+    <div class="panel">
+      <h3>举报待处理（{{ reports.length }}）</h3>
+      <el-table :data="reports" size="small">
+        <el-table-column label="被举报帖" min-width="180">
+          <template #default="{ row }">
+            <el-link type="primary" @click="router.push(`/forum/${row.postId}`)">{{ row.postTitle }}</el-link>
+          </template>
+        </el-table-column>
+        <el-table-column prop="reason" label="举报理由" min-width="160" show-overflow-tooltip />
+        <el-table-column label="举报时间" width="150">
+          <template #default="{ row }">{{ fmtTime(row.createdAt) }}</template>
+        </el-table-column>
+        <el-table-column label="处置" width="220">
+          <template #default="{ row }">
+            <el-button size="small" @click="rptKeep(row)">审查保留</el-button>
+            <el-button size="small" type="danger" plain @click="rptDown(row)">下架</el-button>
+          </template>
+        </el-table-column>
+      </el-table>
+      <el-empty v-if="!reports.length" :image-size="50" description="没有待处理的举报" />
     </div>
 
     <div class="panel">

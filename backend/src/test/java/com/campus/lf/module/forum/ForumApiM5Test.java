@@ -52,6 +52,7 @@ class ForumApiM5Test {
     @Autowired private ObjectMapper om;
     @Autowired private JdbcTemplate jdbcTemplate;
     @Autowired private ForumPostMapper postMapper;
+    @Autowired private com.campus.lf.module.forum.mapper.PostReportMapper reportMapper;
     @Autowired private ForumReplyMapper replyMapper;
     @Autowired private ForumLikeMapper likeMapper;
     @Autowired private ForumService forumService;
@@ -318,11 +319,11 @@ class ForumApiM5Test {
                 .andExpect(status().isUnauthorized());
     }
 
-    // ====================== 举报转审 ======================
+    // ====================== 举报工单（新语义：不即时改帖子状态） ======================
 
     @Test
-    @DisplayName("举报=转回待审；转审后举报者详情 404；举报自己 400")
-    void reportToAuditQueue() throws Exception {
+    @DisplayName("举报=登记工单+帖子保持已发布；重复举报 5005；治理员可见待处理队列；保留/下架均销单；举报自己 400")
+    void reportTicketFlow() throws Exception {
         String author = login(STU_A);
         String mgr = login(STU_B);
         long postId = createPost(author, "疑似广告帖", "加微信领奖 xxx");
@@ -332,12 +333,34 @@ class ForumApiM5Test {
         mockMvc.perform(post("/api/forum/posts/" + postId + "/report").header("Authorization", "Bearer " + reporter)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"疑似微商广告\"}"))
                 .andExpect(jsonPath("$.code").value(0));
-        assertThat(postMapper.selectById(postId).getStatus()).isEqualTo(ForumService.STATUS_PENDING);
-        mockMvc.perform(get("/api/forum/posts/" + postId).header("Authorization", "Bearer " + reporter))
-                .andExpect(status().isNotFound());
+        // 核心新语义：举报后帖子仍是已发布（不因个别举报在线消失）
+        assertThat(postMapper.selectById(postId).getStatus()).isEqualTo(ForumService.STATUS_PUBLISHED);
+        // 重复举报幂等拒
+        mockMvc.perform(post("/api/forum/posts/" + postId + "/report").header("Authorization", "Bearer " + reporter)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"再报一次\"}"))
+                .andExpect(jsonPath("$.code").value(BizCode.REPORT_DUPLICATE.getCode()));
+        // 自举报=意图错 400
         mockMvc.perform(post("/api/forum/posts/" + postId + "/report").header("Authorization", "Bearer " + author)
                         .contentType(MediaType.APPLICATION_JSON).content("{\"reason\":\"自举报\"}"))
                 .andExpect(jsonPath("$.code").value(BizCode.PARAM_ERROR.getCode()));
+        // 治理员可见举报队列
+        mockMvc.perform(get("/api/forum/reports/pending").header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.data.list[?(@.postId==" + postId + ")].reason").value("疑似微商广告"));
+        // 普通学生读队列=403（含未过审理由，治理面）
+        mockMvc.perform(get("/api/forum/reports/pending").header("Authorization", "Bearer " + reporter))
+                .andExpect(jsonPath("$.code").value(BizCode.FORBIDDEN.getCode()));
+        // 审查保留：帖子不动，工单销账
+        mockMvc.perform(post("/api/forum/posts/" + postId + "/reports/keep").header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        assertThat(postMapper.selectById(postId).getStatus()).isEqualTo(ForumService.STATUS_PUBLISHED);
+        // 工单已销账（status=1），待处理队列不再出现该帖
+        List<com.campus.lf.module.forum.entity.PostReport> reps = reportMapper.selectList(
+                new com.baomidou.mybatisplus.core.conditions.query.LambdaQueryWrapper<
+                        com.campus.lf.module.forum.entity.PostReport>()
+                        .eq(com.campus.lf.module.forum.entity.PostReport::getPostId, postId));
+        assertThat(reps).allMatch(r -> r.getStatus() == 1);
+        mockMvc.perform(get("/api/forum/reports/pending").param("pageSize", "50").header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
     }
 
     // ====================== 越权与治理 ======================

@@ -225,6 +225,20 @@ CREATE TABLE IF NOT EXISTS forum_like (
   CONSTRAINT uk_like_post_user UNIQUE (post_id, user_id)
 );
 
+-- ---------- post_report（治理工单：举报不即时下架，管理员处置时 resolve） ----------
+CREATE TABLE IF NOT EXISTS post_report (
+  id         BIGINT       NOT NULL AUTO_INCREMENT,
+  post_id    BIGINT       NOT NULL,
+  user_id    BIGINT       NOT NULL,
+  reason     VARCHAR(200) NULL,
+  status     TINYINT      NOT NULL DEFAULT 0,
+  created_at DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  handled_at DATETIME     NULL,
+  deleted    TINYINT      NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  CONSTRAINT uk_report_post_user UNIQUE (post_id, user_id)
+);
+
 -- ---------- announcement ----------
 CREATE TABLE IF NOT EXISTS announcement (
   id          BIGINT       NOT NULL AUTO_INCREMENT,

@@ -118,12 +118,36 @@ public class ForumController {
         return Result.ok(Map.of("liked", forumService.unlike(me, id)));
     }
 
-    /** 举报（P1 最小实现：转回待审进治理队列） */
+    /** 举报（登记工单+通知管理员；帖子不即时下架，由管理员裁决下架或保留） */
     @PostMapping("/posts/{id}/report")
     public Result<Void> report(@AuthenticationPrincipal LoginUser me,
                                @PathVariable Long id,
                                @RequestBody(required = false) Map<String, String> body) {
         forumService.report(me, id, body == null ? null : body.get("reason"));
+        return Result.ok();
+    }
+
+    /** 治理：待处理举报工单分页 */
+    @GetMapping("/reports/pending")
+    public Result<com.campus.lf.common.PageResult<java.util.Map<String, Object>>> pendingReports(
+            @AuthenticationPrincipal LoginUser me,
+            @RequestParam(defaultValue = "1") long pageNum,
+            @RequestParam(defaultValue = "20") long pageSize) {
+        if (!me.getPerms().contains("forum:audit") && !me.getPerms().contains("forum:offline")) {
+            throw new com.campus.lf.common.BizException(com.campus.lf.common.BizCode.FORBIDDEN,
+                    com.campus.lf.common.BizCode.FORBIDDEN.getMessage(), 403);
+        }
+        return Result.ok(forumService.pagePendingReports(pageNum, pageSize));
+    }
+
+    /** 治理：审查保留（不改变帖子状态，仅销举报工单并回执举报人） */
+    @PostMapping("/posts/{id}/reports/keep")
+    public Result<Void> keepReported(@AuthenticationPrincipal LoginUser me, @PathVariable Long id) {
+        if (!me.getPerms().contains("forum:audit") && !me.getPerms().contains("forum:offline")) {
+            throw new com.campus.lf.common.BizException(com.campus.lf.common.BizCode.FORBIDDEN,
+                    com.campus.lf.common.BizCode.FORBIDDEN.getMessage(), 403);
+        }
+        forumService.resolveReports(id, me.getUserId(), false);
         return Result.ok();
     }
 }

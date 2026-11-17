@@ -192,7 +192,7 @@ async function submit() {
               <span>＋</span>
             </label>
           </div>
-          <div class="cnt">{{ form.imageUrls.length + pending.length }}/9 张（png/jpg/gif/webp，≤5MB；点发布时才上传服务器）</div>
+          <div class="cnt">{{ form.imageUrls.length + pending.length }}/9 张（png/jpg/gif/webp，≤5MB）</div>
         </el-form-item>
 
         <el-form-item>

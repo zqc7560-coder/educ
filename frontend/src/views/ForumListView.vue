@@ -53,6 +53,7 @@ const newPost = () => {
       <div class="right">
         <el-input v-model="keyword" placeholder="搜标题/正文" clearable style="width:200px"
                   @keyup.enter="search" @clear="search" />
+        <el-button type="primary" plain @click="search">搜索</el-button>
         <el-button type="primary" @click="newPost">发帖</el-button>
       </div>
     </div>

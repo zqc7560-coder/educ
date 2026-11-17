@@ -116,7 +116,7 @@ async function submit() {
               <span>＋</span>
             </label>
           </div>
-          <div class="dim">点发布时才上传服务器（{{ imageUrls.length + pending.length }}/9）</div>
+          <div class="dim">{{ imageUrls.length + pending.length }}/9 张</div>
         </el-form-item>
         <el-form-item>
           <el-button type="primary" :loading="submitting" @click="submit">{{ isEdit ? '保存' : '发布' }}</el-button>

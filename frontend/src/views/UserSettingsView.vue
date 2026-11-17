@@ -37,6 +37,7 @@ async function saveProfile() {
 const picked = ref(null)
 const previewUrl = ref('')
 const uploading = ref(false)
+const fileInput = ref(null)
 
 function onPick(e) {
   const f = (e.target.files || [])[0]
@@ -90,16 +91,17 @@ async function changePwd() {
       <div class="ava-row">
         <el-avatar :size="64" :src="(picked ? previewUrl : avatar) || undefined">{{ (profile.nickname || '我')[0] }}</el-avatar>
         <template v-if="!picked">
-          <label class="up">
-            <input type="file" accept="image/*" hidden @change="onPick" />
-            <el-button size="small">选择图片</el-button>
-          </label>
+          <!-- 不能用 <label> 包 button：浏览器不会把落在 button 上的点击转发给
+               label 关联的 file input，导致"选择图片"点了没反应（实测）。
+               改成隐藏 input + 程序化 click 触发 -->
+          <input ref="fileInput" type="file" accept="image/*" class="hidden-file" @change="onPick" />
+          <el-button size="small" @click="fileInput && fileInput.click()">选择图片</el-button>
         </template>
         <template v-else>
           <el-button size="small" type="primary" :loading="uploading" @click="doUpload">确认更换</el-button>
           <el-button size="small" @click="cancelPick">取消</el-button>
         </template>
-        <span class="dim">png/jpg 等，≤5MB；选图后须点「确认更换」才会上传服务器</span>
+        <span class="dim">png/jpg 等，≤5MB</span>
       </div>
       <el-form label-width="70px" style="max-width:420px">
         <el-form-item label="学号"><el-input :model-value="store.user?.studentNo" disabled /></el-form-item>
@@ -131,4 +133,6 @@ h3 { margin: 0 0 14px; font-size: 15px; }
 .dim { color: #909399; font-size: 12px; }
 .tip { margin-bottom: 14px; }
 .up { cursor: pointer; }
+/* 保留在渲染树内（仅视觉隐藏）：Safari 对 display:none 的 input.click() 不弹窗 */
+.hidden-file { position: absolute; width: 1px; height: 1px; opacity: 0; pointer-events: none; }
 </style>

@@ -6,11 +6,11 @@
 --   2) 新增/改列必须两侧同改，由 DatabaseInitM1Test 的实体↔表列机械比对兜底；
 --   3) 表顺序=依赖顺序（被引用者先建），全部 IF NOT EXISTS + 种子 INSERT IGNORE 幂等；
 --   4) ngram_token_size 是建库后不可改项（MySQL 全局参数），compose 启动参数已给死=2。
--- 22 表分域：RBAC(5) sys_user/sys_role/sys_user_role/sys_permission/sys_role_permission
+-- 23 表分域：RBAC(5) sys_user/sys_role/sys_user_role/sys_permission/sys_role_permission
 --   物品(3) lost_item/item_image/category（分类+论坛板块合一字典，kind 区分）
 --   地点(1) campus_area（校区-楼栋两级自连接，第三级为自由文本 location_text）
 --   认领(2) item_claim/claim_log
---   论坛(4) forum_post/post_image/forum_reply/forum_like
+--   论坛(5) forum_post/post_image/forum_reply/forum_like/post_report
 --   公告(2) announcement/announcement_image
 --   消息治理(5) notification/sensitive_word/sys_config/operation_log/user_favorite
 -- =====================================================================
@@ -271,6 +271,22 @@ CREATE TABLE IF NOT EXISTS forum_like (
   UNIQUE KEY uk_like_post_user (post_id, user_id),
   KEY idx_like_user (user_id)
 ) ENGINE=InnoDB COMMENT='帖子点赞（无逻辑删除位：取消即物理删，幂等事实源=uk）';
+
+-- 15b. 帖子举报（uk=一人一帖一次幂等；status 0待处理→1已处置；帖子状态不因举报改变——
+--   管理员在审核台看到举报条目后自行决定下架或保留，处置时 resolve 关闭举报并回执举报人）
+CREATE TABLE IF NOT EXISTS post_report (
+  id           BIGINT       NOT NULL AUTO_INCREMENT,
+  post_id      BIGINT       NOT NULL,
+  user_id      BIGINT       NOT NULL COMMENT '举报人',
+  reason       VARCHAR(200) NULL COMMENT '举报理由',
+  status       TINYINT      NOT NULL DEFAULT 0 COMMENT '0待处理 1已处置',
+  created_at   DATETIME     NOT NULL DEFAULT CURRENT_TIMESTAMP,
+  handled_at   DATETIME     NULL COMMENT '处置时间',
+  deleted      TINYINT      NOT NULL DEFAULT 0,
+  PRIMARY KEY (id),
+  UNIQUE KEY uk_report_post_user (post_id, user_id),
+  KEY idx_report_status (status, created_at)
+) ENGINE=InnoDB COMMENT='帖子举报（治理工单，不即时改变帖子状态）';
 
 -- ---------- 域六：公告 ----------
 
