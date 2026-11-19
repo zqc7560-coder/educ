@@ -44,6 +44,8 @@ services:
       # 在容器路径不复现，但 verify 脚本仍要带 --default-character-set 查询。
       - ../backend/src/main/resources/db/mysql/schema.sql:/docker-entrypoint-initdb.d/01_schema.sql:ro
       - ../backend/src/main/resources/db/mysql/data.sql:/docker-entrypoint-initdb.d/02_data.sql:ro
+      # 03 演示数据包（物品/认领/论坛/回复/点赞/收藏/消息，id 201 段幂等可重放）
+      - ./demo/demo-data.sql:/docker-entrypoint-initdb.d/03_demo_data.sql:ro
     healthcheck:
       # $$ 是 compose 转义：让容器内 shell 展开变量而非宿主机插值
       test: ["CMD-SHELL", 'mysqladmin ping -h localhost -uroot -p"$${MYSQL_ROOT_PASSWORD}" --silent']
