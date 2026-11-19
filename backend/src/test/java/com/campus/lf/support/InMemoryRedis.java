@@ -10,6 +10,7 @@ import java.util.concurrent.ConcurrentHashMap;
 
 import static org.mockito.ArgumentMatchers.any;
 import static org.mockito.ArgumentMatchers.anyLong;
+import static org.mockito.ArgumentMatchers.anyCollection;
 import static org.mockito.ArgumentMatchers.anyString;
 import static org.mockito.Mockito.mock;
 import static org.mockito.Mockito.when;
@@ -64,6 +65,11 @@ public final class InMemoryRedis {
         // M6 补齐：GET（AI 缓存读/配额读）与 INCR（配额计数）——语义与真 Redis 一致，
         // increment 用 compute 保证原子性（测试里虽然多为单线程，但语义对齐才可信）
         when(valueOps.get(anyString())).thenAnswer(inv -> store.get(inv.<String>getArgument(0)));
+        // 列表 PV 叠加快照用（ItemCacheService.pvDeltas）：与 get 同语义按 key 映射
+        when(valueOps.multiGet(anyCollection())).thenAnswer(inv -> {
+            java.util.Collection<String> ks = inv.getArgument(0);
+            return ks.stream().map(store::get).toList();
+        });
         when(valueOps.increment(anyString())).thenAnswer(inv -> {
             String k = inv.getArgument(0);
             Object v = store.compute(k, (key, old) -> {

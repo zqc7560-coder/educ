@@ -354,6 +354,28 @@ class ApiGapM10Test {
     }
 
     @Test
+    @DisplayName("列表/详情浏览数一致：批刷窗口内两处 viewCount 相等（用户实测对不上）")
+    void listViewMatchesDetail() throws Exception {
+        String stu = login(STU_A);
+        long id = createItem(stu, "列表详情对账件");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + login(MGR)))
+                .andExpect(jsonPath("$.code").value(0));
+        // 他人真实浏览一次：缓冲 +1（未落库）
+        mockMvc.perform(get("/api/items/" + id)
+                        .header("Authorization", "Bearer " + login(MGR))).andReturn();
+        // 详情展示=1（DB0+缓冲1）；列表展示必须也=1（此前列表读纯 DB=0，5min 内对不上）
+        MvcResult hall = mockMvc.perform(get("/api/items").param("keyword", "列表详情对账件")).andReturn();
+        int lv = envelope(hall).path("data").path("list").get(0).path("viewCount").asInt();
+        MvcResult det = mockMvc.perform(get("/api/items/" + id)
+                .header("Authorization", "Bearer " + login(MGR))).andReturn();
+        int dv = envelope(det).path("data").path("viewCount").asInt();
+        assertThat(lv).isEqualTo(dv);
+        assertThat(dv).isEqualTo(1);   // 同人复访不重复计，仍 1
+    }
+
+    @Test
     @DisplayName("详情收藏态服务端回读：收藏→favorited=true，取消→false（刷新复位 bug 钉）")
     void detailFavoritedReadBack() throws Exception {
         String stu = login(STU_A);

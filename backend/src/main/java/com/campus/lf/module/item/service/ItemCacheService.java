@@ -226,6 +226,29 @@ public class ItemCacheService {
         }
     }
 
+    /** 批量读未落盘 PV 缓冲（列表展示叠用；一次 MGET，Redis 抖动返回空 map=不叠） */
+    public java.util.Map<Long, Long> pvDeltas(java.util.List<Long> ids) {
+        java.util.Map<Long, Long> out = new java.util.HashMap<>();
+        if (ids == null || ids.isEmpty()) {
+            return out;
+        }
+        try {
+            List<String> vals = redis.opsForValue().multiGet(
+                    ids.stream().map(i -> PV_PREFIX + i).toList());
+            if (vals != null) {
+                for (int i = 0; i < ids.size() && i < vals.size(); i++) {
+                    String v = vals.get(i);
+                    if (v != null && !v.isBlank()) {
+                        out.put(ids.get(i), Long.parseLong(v));
+                    }
+                }
+            }
+        } catch (Exception e) {
+            log.warn("PV 缓冲批量读失败（列表按 DB 值展示）: {}", e.getMessage());
+        }
+        return out;
+    }
+
     public long peekCounter(String key) {
         try {
             String s = redis.opsForValue().get(key);

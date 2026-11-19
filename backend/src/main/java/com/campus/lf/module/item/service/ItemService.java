@@ -734,6 +734,9 @@ public class ItemService {
             covers.computeIfAbsent(img.getItemId(), k -> new java.util.ArrayList<>()).add(img.getUrl());
         }
 
+        // 浏览展示与详情同公式：DB 落库值 + 未落盘 Redis 缓冲（批量 MGET 一次拿齐），
+        // 否则首页卡片(纯 DB)与详情(DB+缓冲)在 5min 批刷窗口内数字对不上（用户实测）
+        Map<Long, Long> pvs = cache.pvDeltas(rows.stream().map(LostItem::getId).toList());
         List<ItemVO> list = rows.stream().map(r -> ItemVO.builder()
                 .id(r.getId())
                 .type(r.getType())
@@ -751,6 +754,8 @@ public class ItemService {
                 .publishedAt(r.getPublishedAt())
                 .coverUrl(covers.getOrDefault(r.getId(), List.of()).stream().findFirst().orElse(null))
                 .images(covers.getOrDefault(r.getId(), List.of()))
+                .viewCount((r.getViewCount() == null ? 0 : r.getViewCount())
+                        + pvs.getOrDefault(r.getId(), 0L).intValue())
                 .build()).toList();
         return new PageResult<>(page.getTotal(), page.getPages(),
                 page.getCurrent(), page.getSize(), list);

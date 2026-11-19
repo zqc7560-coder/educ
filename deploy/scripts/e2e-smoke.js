@@ -1,10 +1,11 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟 104 断言（真接口+真浏览器混合）
+ * 校园失物招领系统 · 全功能端到端冒烟 106 断言（真接口+真浏览器混合）
  * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
  * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏(含
  *       服务端态回读)→举报工单→两段式上传→编辑重审→治理口→看板→消息→
- *       游客视角+登录页游客入口→卡片封面轮播→浏览三律·三域同口径
- *       (访客去重/作者自览不计/pv=0 非浏览读不计/展示即时)→
+ *       游客视角+登录页游客入口→卡片封面轮播→浏览五律·三域同口径
+ *       (访客去重/作者自览不计/pv=0 非浏览读不计/展示即时=DB+缓冲/
+ *       列表与详情一致/重登不重置去重窗)→
  *       未审核内容互动闸（收藏/点赞/回复+归一 replyToId 闸，管理员同闸）
  * 纪律：同号重登会按"登录水位"踢掉在先令牌——复用 token 的段落禁止中途重登，
  *       需要新身份就注册新号；回复防刷 10s 窗同理，一段一号只发一贴。
@@ -179,6 +180,17 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const b4 = (await api(`/items/${nvid}?pv=0`, { tok: vTok2 })).data?.viewCount;
     const b5 = (await api(`/items/${nvid}`, { tok: vTok2 })).data?.viewCount;
     ok('pv=0 非浏览读不计且展示正确', b4 === 1 && b5 === 2, `pv0=${b4} then=${b5}`);
+    // ⑤ 首页列表与详情浏览数一致（批刷窗口内同公式：DB+缓冲；用户实测对不上根修）
+    // keyword 唯一串保证未命中 5min 列表缓存（缓存快照会滞后于瞬时缓冲）
+    const hallV = await api(`/items?keyword=${encodeURIComponent('浏览三律件' + STAMP)}`);
+    const rowV = (hallV.data?.list || []).find(x => x.id === nvid)?.viewCount;
+    const detV = (await api(`/items/${nvid}`, { tok: ownTok })).data?.viewCount;   // 作者读=展示校准不加数
+    ok('★首页列表 viewCount == 详情 viewCount', rowV === detV && detV >= 2, `list=${rowV} detail=${detV}`);
+    // ⑥ 退出重登(新令牌同 uid)不重置 24h 去重窗
+    await api('/auth/logout', { tok: vTok1, method: 'POST' });
+    const vTok1b = (await api('/auth/login', { body: { studentNo: vNo1, password: PWD } })).data?.token;
+    const re = (await api(`/items/${nvid}`, { tok: vTok1b })).data?.viewCount;
+    ok('★重新登录后再浏览不重复计数', re === detV || re === b5, `before=${b5} relogin=${re}`);
   }
 
   // ---------- 7. 论坛：发帖→未发布闸（收藏/点赞/回复全拒）→审核通过→可互动 ----------
