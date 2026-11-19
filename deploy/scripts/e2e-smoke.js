@@ -1,13 +1,9 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟 65 断言（真接口+真浏览器混合）
- * 用法: node e2e-smoke.js [base=http://localhost:8088]
- * 覆盖: 注册/登录/封禁、发布(两段式图片)/检索/收藏闸、认领状态机(核验/归还/防并发)、
- *       论坛(发帖审核/待审三禁/过审放行/两级回复/举报工单新语义)、编辑重审、公告、
- *       管理端(过审=403 回归钉/看板/敏感词/参数/用户治理/回收站/日志/举报队列权限/置顶)、
- *       消息、头像两段式(按钮真点击弹选择器)、论坛搜索按钮、我的发布双分区、返回按钮、
- *       游客视角(引导条/大厅/详情脱敏/认领引导登录/论坛公告可逛/发帖引导)、相似推荐口、
- *       item:top 权限矩阵。
- * 退出码 0=全绿；每断言打印 PASS/FAIL 与失败详情。
+ * 校园失物招领系统 · 全功能端到端冒烟（真接口+真浏览器混合）
+ * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
+ * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏→
+ *       举报工单→两段式上传→编辑重审→治理口→看板→消息→游客视角→
+ *       卡片封面按图找物→未审核内容互动闸（收藏/点赞/回复，管理员同闸）
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -84,11 +80,15 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
   r = await api(`/items/${itemId}`, { tok: stuTok });
   ok('作者可见自己件详情', r.code === 0 || r.code === 2001 /* 若需审核则作者外不可见但作者可见 */);
 
-  // ---------- 5. 收藏物品 toggle 幂等 ----------
+  // ---------- 5. 收藏物品 toggle 幂等（新闸口径：先过审才可收藏） ----------
+  {
+    const st0 = (await api(`/items/${itemId}`, { tok: stuTok })).data?.status;
+    if (st0 === 0) await api(`/items/${itemId}/status?target=1`, { tok: adminTok, method: 'PATCH' });
+  }
   r = await api('/favorites/toggle', { tok: stuTok, body: { targetType: 'ITEM', targetId: itemId } });
   const fav1 = r.data?.favorited;
   r = await api('/favorites/toggle', { tok: stuTok, body: { targetType: 'ITEM', targetId: itemId } });
-  ok('收藏物品 toggle 往返', r.data?.favorited !== fav1);
+  ok('收藏物品 toggle 往返', fav1 === true && r.data?.favorited === false, JSON.stringify({fav1, second: r.data?.favorited}));
 
   // ---------- 6. 认领状态机（另一学生申请→答题→发布者确认→归还） ----------
   const claimerNo = '7' + STAMP.slice(-8);
@@ -140,8 +140,15 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
   ok('发帖一级回复', r.code === 0, JSON.stringify(r).slice(0,120));
   const rootReply = r.data?.id;
   if (rootReply) {
+    // forum_audit=1：一级楼待审时盖二级会被新闸拒(5008)——先走回复处置口放行一级再盖
+    const rootPend = await api(`/forum/posts/${postId}/replies`, { tok: mgrTok });
+    const rootNode = (rootPend.data || []).find(x => x.id === rootReply);
+    if (rootNode && rootNode.status === 0) {
+      const handle = await api(`/admin/replies/${rootReply}/handle`, { tok: adminTok, body: { target: 1 } });
+      ok('管理员放行一级待审楼', handle.code === 0, `got ${handle.code}`);
+    }
     r = await api(`/forum/posts/${postId}/replies`, { tok: stuTok, body: { content: '回复二级：谢谢支持', parentId: rootReply } });
-    ok('两级回复(楼中楼)', r.code === 0, `got ${r.code} ${r.msg}`);
+    ok('两级回复(楼中楼·放行后)', r.code === 0, `got ${r.code} ${r.msg}`);
     const lateTok = (await api('/auth/login', { body: { studentNo: claimerNo, password: PWD } })).data?.token;
     const r3 = await api(`/forum/posts/${postId}/replies`, { tok: lateTok, body: { content: '三级违规', parentId: r.data?.id } });
     ok('三级回复被拒(5006；若先撞防刷 5007 也算闸门生效)', r3.code === 5006 || r3.code === 400 || r3.code === 5007, `got ${r3.code}`);
@@ -297,6 +304,72 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
   await page.waitForTimeout(1200);
   await page.waitForTimeout(800);
   ok('返回按钮离开详情页(回到站内上一页)', !page.url().includes('/forum/' + postId), 'url=' + page.url());
+
+  // ---------- 13b. 收藏状态闸（用户实测 bug 回归钉：待审/下架内容谁都不可收藏） ----------
+  {
+    const gateNo = '6' + STAMP.slice(-8);
+    await register(gateNo, '闸测号' + STAMP);
+    const gateTok = (await api('/auth/login', { body: { studentNo: gateNo, password: PWD } })).data?.token;
+    const pend2 = await api('/items', { tok: gateTok, body: {
+      type: 'FOUND', title: '闸测待审件' + STAMP, description: '待审状态收藏闸验证用物品', categoryId: catId,
+      happenedAt: new Date(Date.now() - 3600e3).toISOString().slice(0, 19), verifyQuestion: '测试核验问题' } });
+    const pid2 = pend2.data?.id;
+    ok('闸测件创建成功', pend2.code === 0 && !!pid2, JSON.stringify(pend2).slice(0,120));
+    const mgrFav = await api('/favorites/toggle', { tok: mgrTok, body: { targetType: 'ITEM', targetId: pid2 } });
+    ok('★管理员收藏待审物品被拒(2005)——实测 bug 回归钉', mgrFav.code === 2005, `got ${mgrFav.code}`);
+    const adminFav = await api('/favorites/toggle', { tok: adminTok, body: { targetType: 'ITEM', targetId: pid2 } });
+    ok('ADMIN 收藏待审物品同样被拒', adminFav.code === 2005, `got ${adminFav.code}`);
+    await api(`/items/${pid2}/status?target=1`, { tok: adminTok, method: 'PATCH' });
+    const okFav = await api('/favorites/toggle', { tok: adminTok, body: { targetType: 'ITEM', targetId: pid2 } });
+    ok('过审后管理员可收藏', okFav.code === 0 && okFav.data?.favorited === true, JSON.stringify(okFav).slice(0,80));
+    await api(`/items/${pid2}/status?target=2&reason=闸测下架`, { tok: gateTok, method: 'PATCH' });
+    const unfav = await api('/favorites/toggle', { tok: adminTok, body: { targetType: 'ITEM', targetId: pid2 } });
+    ok('下架后原收藏者可取消收藏(不受闸)', unfav.code === 0 && unfav.data?.favorited === false, JSON.stringify(unfav).slice(0,80));
+    const freshNo = await api('/favorites/toggle', { tok: cTok, body: { targetType: 'ITEM', targetId: pid2 } });
+    ok('下架件对未收藏者新增收藏被拒(2005)', freshNo.code === 2005, `got ${freshNo.code}`);
+    // 待审帖子收藏对称确认（同 gateTok，物品+帖子共用日限池，一次创建无碍）
+    const pendPost = await api('/forum/posts', { tok: gateTok, body: { boardId, title: '闸测待审帖' + STAMP, content: '收藏闸对称验证正文' } });
+    if (pendPost.data?.status === 0) {
+      const pf = await api('/favorites/toggle', { tok: mgrTok, body: { targetType: 'POST', targetId: pendPost.data.id } });
+      ok('管理员收藏待审帖被拒(5008)', pf.code === 5008, `got ${pf.code}`);
+    }
+  }
+
+  // ---------- 13c. 卡片封面图（按图找物）+ 治理者回复闸 ----------
+  {
+    const hall = await api('/items?pageSize=20');
+    const withCover = (hall.data?.list || []).filter(x => x.coverUrl);
+    ok('大厅列表带 coverUrl 封面', withCover.length >= 2, 'covers=' + withCover.length);
+    ok('封面为站内图片路径', withCover.every(x => /^\/uploads\//.test(x.coverUrl)), JSON.stringify((withCover[0]||{}).coverUrl));
+    await page.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await page.waitForTimeout(1500);
+    const coverImgs = await page.locator('.grid .card .cover-img').count();
+    ok('首页卡片渲染封面图>=2', coverImgs >= 2, 'rendered=' + coverImgs);
+    const natural = await page.evaluate(() => {
+      const im = document.querySelector('.grid .card .cover-img');
+      return im ? { ok: im.complete && im.naturalWidth > 0, fit: getComputedStyle(im).objectFit } : null;
+    });
+    ok('封面真实加载且 contain 完整展示', natural && natural.ok && natural.fit === 'contain', JSON.stringify(natural));
+
+    // 治理者回复闸：管理员回复他人待审帖 → 拒绝
+    const gateNo = '7' + STAMP.slice(-8);
+    await register(gateNo, '回复闸号' + STAMP);
+    const gTok = (await api('/auth/login', { body: { studentNo: gateNo, password: PWD } })).data?.token;
+    const gPost = await api('/forum/posts', { tok: gTok, body: { boardId, title: '治理回复闸帖' + STAMP, content: '治理者不得回复未发布帖的验证正文' } });
+    const gPid = gPost.data?.id;
+    ok('闸帖创建(待审)', gPost.code === 0 && gPost.data?.status === 0, JSON.stringify(gPost).slice(0, 90));
+    const mgrReply = await api(`/forum/posts/${gPid}/replies`, { tok: mgrTok, body: { content: '管理员抢跑回复' } });
+    ok('★管理员回复未发布帖被拒(5008)——实测 bug 回归钉', mgrReply.code === 5008, 'got ' + mgrReply.code);
+    const ownReply = await api(`/forum/posts/${gPid}/replies`, { tok: gTok, body: { content: '作者自己抢跑' } });
+    ok('作者回复自己待审帖同样被拒', ownReply.code === 5008, 'got ' + ownReply.code);
+    await api(`/forum/posts/${gPid}/status?target=1`, { tok: adminTok, method: 'PATCH' });
+    // mgr/g 两号的 5008 尝试都占了 10s 防刷窗口（闸先于业务记录时间戳）——用全新号验证"过审即放行"
+    const freshNo = '8' + STAMP.slice(-8);
+    await register(freshNo, '放行验证号' + STAMP);
+    const freshTok = (await api('/auth/login', { body: { studentNo: freshNo, password: PWD } })).data?.token;
+    const okReply = await api(`/forum/posts/${gPid}/replies`, { tok: freshTok, body: { content: '过审后正常回复互动' } });
+    ok('过审后回复放行', okReply.code === 0, 'got ' + okReply.code);
+  }
 
   // ---------- 14. 游客视角（全新无登录上下文）：大厅可逛/详情可读/相似推荐可见/引导条在 ----------
   {

@@ -243,12 +243,24 @@ class ForumApiM5Test {
         publish(mgr, postId);
 
         long r1 = reply(mgr, postId, null, "我们这届都是 7 点");
+        // forum_audit=1 → r1 待审；新闸口径：待审楼下面不可盖楼，先走回复处置口放行 r1
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/admin/replies/" + r1 + "/handle")
+                        .header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"target\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
         unlockReply(mgr);
         unlockReply(author);
         long r2 = reply(author, postId, r1, "感谢！");
         assertThat(replyMapper.selectById(r2).getParentId()).isEqualTo(r1);
 
         String third = registerAndLogin();
+        // r2 是待审楼：先放行，让下面的 5006 测的是"两级封顶"而非"待审父楼闸"
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/admin/replies/" + r2 + "/handle")
+                        .header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"target\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
         // 给二级回复再挂 → 5006（两级封顶，API 直连也拦得住）
         mockMvc.perform(post("/api/forum/posts/" + postId + "/replies").header("Authorization", "Bearer " + third)
                         .contentType(MediaType.APPLICATION_JSON)
@@ -256,6 +268,7 @@ class ForumApiM5Test {
                 .andExpect(jsonPath("$.code").value(BizCode.REPLY_LEVEL_EXCEEDED.getCode()));
         // 跨帖父 → 400（注：上一条 5006 尝试已占用 third 的防刷时间戳——
         // 闸在业务校验之前记录，这是"防刷优先于业务判定"的顺序纪律，需先解锁）
+        unlockReply(third);
         unlockReply(third);
         long otherPost = createPost(third, "另一个帖", "正文内容");
         publish(mgr, otherPost);   // 不发布则先撞"帖未发布不可回复"(5008)——跨帖父校验在其后
@@ -271,6 +284,33 @@ class ForumApiM5Test {
                 .andExpect(jsonPath("$.data[0].children[0].replyToNickname").value("李同学"));
         // 计数不变式：reply_count=本帖未删回复数（提交即+1，不分审核状态）
         assertThat(postMapper.selectById(postId).getReplyCount()).isEqualTo(2);
+    }
+
+    @Test
+    @DisplayName("待审父楼闸：挂在未过审回复下面 → 5008（防绕审核造隐形树）")
+    void pendingParentBlocked() throws Exception {
+        String author = login(STU_A);
+        String mgr = login(STU_B);
+        long postId = createPost(author, "父楼闸帖", "验证待审父楼的正文内容");
+        publish(mgr, postId);
+        long r1 = reply(author, postId, null, "一级待审楼（不放行）");
+
+        String other = registerAndLogin();
+        mockMvc.perform(post("/api/forum/posts/" + postId + "/replies").header("Authorization", "Bearer " + other)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"挂在待审楼下\",\"parentId\":" + r1 + "}"))
+                .andExpect(jsonPath("$.code").value(BizCode.POST_STATUS_INVALID.getCode()));
+        // 放行后同挂点可回
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/admin/replies/" + r1 + "/handle")
+                        .header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"target\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
+        unlockReply(other);
+        mockMvc.perform(post("/api/forum/posts/" + postId + "/replies").header("Authorization", "Bearer " + other)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"放行后正常盖楼\",\"parentId\":" + r1 + "}"))
+                .andExpect(jsonPath("$.code").value(0));
     }
 
     @Test

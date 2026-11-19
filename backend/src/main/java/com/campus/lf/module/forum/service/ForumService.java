@@ -323,15 +323,13 @@ public class ForumService {
         assertWritable(me.getUserId());
         assertReplyRateLimit(me.getUserId());
         ForumPost post = postMapper.selectById(postId);
-        if (post == null || post.getStatus() != STATUS_PUBLISHED) {
-            // 待审帖作者自己可以提前看到回复列表，但别人不能回（防"审核期预热灌水"）
-            boolean author = me != null && post != null && post.getUserId().equals(me.getUserId());
-            if (post == null) {
-                throw new BizException(BizCode.POST_NOT_FOUND, BizCode.POST_NOT_FOUND.getMessage(), 404);
-            }
-            if (!author && !canGovern(me)) {
-                throw new BizException(BizCode.POST_NOT_FOUND, BizCode.POST_NOT_FOUND.getMessage(), 404);
-            }
+        if (post == null) {
+            throw new BizException(BizCode.POST_NOT_FOUND, BizCode.POST_NOT_FOUND.getMessage(), 404);
+        }
+        if (post.getStatus() != STATUS_PUBLISHED) {
+            // 互动闸收口（用户实测 bug）：待审/下架帖对所有人一律不可回复——
+            // 治理者同样拒绝（审核通过后才可互动），不再给 canGovern 开后门；
+            // "作者提前看到回复列表"只读口不受影响（replyTree 的 privileged 保持）
             throw new BizException(BizCode.POST_STATUS_INVALID, "帖子未发布，暂不可回复");
         }
 
@@ -344,7 +342,12 @@ public class ForumService {
             }
             if (parent.getParentId() != null) {
                 // 两级封顶：拒绝挂到二级回复下面（前端应归一到一级；这里兜底 API 直连攻击）
+                // 注意次序：先判层级再判父楼状态——挂在待审二级楼下时 5006 语义更准
                 throw new BizException(BizCode.REPLY_LEVEL_EXCEEDED);
+            }
+            if (parent.getStatus() != null && parent.getStatus() != STATUS_PUBLISHED) {
+                // 父楼待审/已下架时不可在其下继续盖楼（否则绕过回复审核造出隐形树）
+                throw new BizException(BizCode.POST_STATUS_INVALID, "该回复尚未通过审核，暂不可在其下回复");
             }
             if (replyToUid == null) {
                 replyToUid = parent.getUserId();   // 回复某人 → 自动@他

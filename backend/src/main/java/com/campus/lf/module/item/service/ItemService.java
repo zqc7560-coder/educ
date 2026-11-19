@@ -30,6 +30,7 @@ import org.springframework.stereotype.Service;
 import org.springframework.transaction.annotation.Transactional;
 
 import java.time.LocalDateTime;
+import java.util.HashMap;
 import java.util.List;
 import java.util.Map;
 import java.util.Objects;
@@ -686,6 +687,13 @@ public class ItemService {
                     .collect(Collectors.toMap(Category::getId, Category::getName));
         Map<Long, String> nicknames = userMapper.selectBatchIds(userIds).stream()
                 .collect(Collectors.toMap(SysUser::getId, SysUser::getNickname));
+        // 封面图：整页一次 IN 批查，取各件 sort_order 首图（卡片按图找物；防 N+1）
+        Map<Long, String> covers = new HashMap<>();
+        for (ItemImage img : imageMapper.selectList(new LambdaQueryWrapper<ItemImage>()
+                .in(ItemImage::getItemId, rows.stream().map(LostItem::getId).toList())
+                .orderByAsc(ItemImage::getSortOrder))) {
+            covers.putIfAbsent(img.getItemId(), img.getUrl());
+        }
 
         List<ItemVO> list = rows.stream().map(r -> ItemVO.builder()
                 .id(r.getId())
@@ -702,42 +710,13 @@ public class ItemService {
                 .claimCount(r.getClaimCount())
                 .topFlag(r.getTopFlag())
                 .publishedAt(r.getPublishedAt())
+                .coverUrl(covers.get(r.getId()))
                 .images(List.of())
                 .build()).toList();
         return new PageResult<>(page.getTotal(), page.getPages(),
                 page.getCurrent(), page.getSize(), list);
     }
 
-    /**
-     * 首页图片轮播（GET /api/items/carousel，公开）：取近期已发布且带图的招领/失物件，
-     * 每件首图一帧——失主刷首页即可"看图认物"。只给发布态件（与大厅口径一致，
-     * 待审/下架图不得出现在首页）；置顶件优先，其余按发布时间倒序，最多 8 帧。
-     */
-    public java.util.List<java.util.Map<String, Object>> carousel(int limit) {
-        java.util.List<LostItem> pub = itemMapper.selectList(new LambdaQueryWrapper<LostItem>()
-                .eq(LostItem::getStatus, STATUS_PUBLISHED)
-                .orderByDesc(LostItem::getTopFlag).orderByDesc(LostItem::getPublishedAt)
-                .last("limit 60"));
-        java.util.List<java.util.Map<String, Object>> frames = new java.util.ArrayList<>();
-        for (LostItem it : pub) {
-            if (frames.size() >= limit) {
-                break;
-            }
-            String first = imageMapper.selectList(new LambdaQueryWrapper<ItemImage>()
-                            .eq(ItemImage::getItemId, it.getId()).orderByAsc(ItemImage::getSortOrder))
-                    .stream().map(ItemImage::getUrl).findFirst().orElse(null);
-            if (first == null) {
-                continue;   // 无图件不进轮播
-            }
-            java.util.Map<String, Object> m = new java.util.HashMap<>();
-            m.put("itemId", it.getId());
-            m.put("title", it.getTitle());
-            m.put("type", it.getType());
-            m.put("url", first);
-            frames.add(m);
-        }
-        return frames;
-    }
 
     private String areaName(Long areaId) {
         if (areaId == null) {

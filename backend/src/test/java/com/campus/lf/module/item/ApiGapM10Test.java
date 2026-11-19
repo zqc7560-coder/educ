@@ -257,33 +257,62 @@ class ApiGapM10Test {
     }
 
     @Test
-    @DisplayName("首页轮播口：游客可访问；仅已发布带图件成帧；待审/无图件不进轮播")
-    void carouselPublic() throws Exception {
-        // 游客直访（PUBLIC_GETS /api/items/* 覆盖 carousel 的登记回归钉：忘登记=401）
-        MvcResult r0 = mockMvc.perform(get("/api/items/carousel")).andReturn();
-        assertThat(envelope(r0).path("code").asInt()).isEqualTo(0);
+    @DisplayName("列表封面 coverUrl：首图口径、无图为 null、全状态列表各见其图")
+    void listCoverUrl() throws Exception {
+        String stu = login(STU_A);
+        long id = createItem(stu, "封面样本件");   // 待审
+        // 直挂两张图（绕过上传口）：sort_order=0 的必须赢
+        jdbcTemplate.update("insert into item_image(item_id,url,sort_order,created_at,deleted) values(?,?,0,CURRENT_TIMESTAMP,0)",
+                id, "/uploads/demoimg/first.png");
+        jdbcTemplate.update("insert into item_image(item_id,url,sort_order,created_at,deleted) values(?,?,1,CURRENT_TIMESTAMP,0)",
+                id, "/uploads/demoimg/second.png");
 
+        // 作者"我的发布"：待审件也带封面（自己视角按图找物）
+        MvcResult mine = mockMvc.perform(get("/api/items/mine").header("Authorization", "Bearer " + stu)).andReturn();
+        String d = envelope(mine).path("data").path("list").toString();
+        assertThat(d).contains("\"coverUrl\":\"/uploads/demoimg/first.png\"");
+
+        // 大厅游客列表：该件未发布→不在列表；发布后→coverUrl 出现（首图，非第二图）
+        mockMvc.perform(get("/api/items")).andReturn();  // 预热缓存键
+        mockMvc.perform(patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + login(MGR))).andExpect(jsonPath("$.code").value(0));
+        // 发布状态变更会清列表缓存；这里 keyword 查询走 DB 直读路径避免缓存时序
+        MvcResult hall = mockMvc.perform(get("/api/items").param("keyword", "封面样本件")).andReturn();
+        String h = envelope(hall).path("data").path("list").toString();
+        assertThat(h).contains("first.png");
+        assertThat(h).doesNotContain("second.png");   // 列表只给首图，整图集留给详情
+    }
+
+    @Test
+    @DisplayName("互动闸补全：治理者也不可回复未发布帖/待审楼（实测 bug 回归钉）")
+    void governReplyGate() throws Exception {
         String stu = login(STU_A);
         String mgr = login(MGR);
-        long pub = createItem(stu, "轮播在线件");
-        mockMvc.perform(patch("/api/items/" + pub + "/status").param("target", "1")
-                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
-        long pend = createItem(stu, "轮播待审件");   // 保持待审
+        // 待审帖
+        MvcResult post = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"boardId\":\"11\",\"title\":\"治理回复闸帖\",\"content\":\"待审状态治理者回复验证正文\"}"))
+                .andReturn();
+        long pid = Long.parseLong(envelope(post).path("data").path("id").asText());
 
-        // 直挂图（绕过上传口，只测读取逻辑）：两件各一张首图
-        for (long id : new long[]{pub, pend}) {
-            jdbcTemplate.update("insert into item_image(item_id,url,sort_order,created_at,deleted) values(?,?,0,CURRENT_TIMESTAMP,0)",
-                    id, "/uploads/demoimg/card.png");
-        }
-        MvcResult r1 = mockMvc.perform(get("/api/items/carousel")).andReturn();
-        String data = envelope(r1).path("data").toString();
-        assertThat(data).contains("轮播在线件");
-        assertThat(data).doesNotContain("轮播待审件");   // 待审图不得上首页
-        // 帧结构：itemId/url/type/title 齐备
-        var arr = envelope(r1).path("data");
-        for (var f : arr) {
-            assertThat(f.hasNonNull("itemId") && f.hasNonNull("url") && f.hasNonNull("title")).isTrue();
-        }
+        // MANAGER 回复待审帖 → 拒绝（此前 canGovern 开后门=实测 bug）
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"管理员抢跑回复\"}"))
+                .andExpect(jsonPath("$.code").value(BizCode.POST_STATUS_INVALID.getCode()));
+
+        // 过审 → 学生发一级评论（审核开关关时直接已发布）
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/forum/posts/" + pid + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
+        MvcResult r1 = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"一级正常评论\"}"))
+                .andReturn();
+        assertThat(envelope(r1).path("code").asInt()).isEqualTo(0);
     }
 
     @Test
