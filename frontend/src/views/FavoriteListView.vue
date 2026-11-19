@@ -20,7 +20,8 @@ async function load() {
     const out = []
     for (const f of raw.value) {
       try {
-        const vo = tab.value === 'ITEM' ? await fetchItem(f.targetId) : await fetchPost(f.targetId)
+        // pv 免计：收藏页"解析目标"不是浏览行为（用户口径：一人一次浏览）
+        const vo = tab.value === 'ITEM' ? await fetchItem(f.targetId, { countView: false }) : await fetchPost(f.targetId, { countView: false })
         out.push({ ...f, vo })
       } catch { /* 目标已删/不可见：跳过渲染（数据保留，取消收藏仍可点） */ }
     }

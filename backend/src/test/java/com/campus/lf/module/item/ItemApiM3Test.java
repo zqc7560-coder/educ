@@ -551,9 +551,9 @@ class ItemApiM3Test {
                 .header("X-Real-IP", "10.1.1.1")).andReturn();
         mockMvc.perform(get("/api/items/" + id).header("X-Real-IP", "10.1.1.1")).andReturn();  // 同访客复访
         mockMvc.perform(get("/api/items/" + id).header("X-Real-IP", "10.9.9.9")).andReturn();  // 另一访客
-        // 展示语义变更（M9 决策，答辩口径）：详情 viewCount 来自缓存快照/DB 旧值，
-        // 允许滞后 ≤5min——浏览量是统计语义不是账本，换读路径零 UPDATE 主表
-        assertThat(envelope(r1).path("data").path("viewCount").asInt()).isEqualTo(0);
+        // 展示即时（与帖/公告对齐，用户报"口径不一"根修）：viewCount=DB+未落盘缓冲，
+        // 首读即见 1；此前回 DB 快照滞后 5min 造成"有时涨有时不涨"的错觉
+        assertThat(envelope(r1).path("data").path("viewCount").asInt()).isEqualTo(1);
 
         // 浏览去重（用户要求）：同 IP 两刷只 +1，第二 IP 再 +1 → 计数 2；落库 DB=2
         assertThat(itemCache.peekCounter("lf:pv:" + id)).isEqualTo(2);

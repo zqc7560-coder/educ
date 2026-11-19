@@ -46,6 +46,7 @@ public class ForumController {
     @GetMapping("/posts/{id}")
     public Result<PostVO> detail(@AuthenticationPrincipal LoginUser me,
                                  @PathVariable Long id,
+                                 @RequestParam(defaultValue = "1") int pv,
                                  jakarta.servlet.http.HttpServletRequest request) {
         String viewerKey;
         if (me != null) {
@@ -54,7 +55,7 @@ public class ForumController {
             String rip = request.getHeader("X-Real-IP");
             viewerKey = "ip:" + (rip == null || rip.isBlank() ? request.getRemoteAddr() : rip);
         }
-        return Result.ok(forumService.detail(me, id, viewerKey));
+        return Result.ok(forumService.detail(me, id, viewerKey, pv != 0));
     }
 
     @PostMapping("/posts")

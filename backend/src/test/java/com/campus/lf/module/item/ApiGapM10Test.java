@@ -41,6 +41,11 @@ class ApiGapM10Test {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper om;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private com.campus.lf.module.item.service.ItemCacheService itemCache;
+
+    private long itemCachePeek(long id) {
+        return itemCache.peekCounter(com.campus.lf.module.item.service.ItemCacheService.PV_PREFIX + id);
+    }
     @Autowired private com.campus.lf.module.forum.service.ForumService forumService;
 
     private static final String SEED_PWD = "password123";
@@ -318,6 +323,34 @@ class ApiGapM10Test {
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"content\":\"放行后正常回复\",\"parentId\":" + root1 + ",\"replyToId\":" + pend2 + "}"))
                 .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
+    @DisplayName("物品浏览三律：?pv=0 非浏览读不计、作者自览不计、展示即时=DB+缓冲")
+    void itemViewParity() throws Exception {
+        String stu = login(STU_A);
+        long id = createItem(stu, "浏览三律件");
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + login(MGR)))
+                .andExpect(jsonPath("$.code").value(0));
+        // 收藏页/编辑页式非浏览读：任意多次不动计数
+        for (int i = 0; i < 3; i++) {
+            mockMvc.perform(get("/api/items/" + id).param("pv", "0")
+                            .header("X-Real-IP", "10.7.7.7")).andReturn();
+        }
+        assertThat(itemCachePeek(id)).isZero();
+        // 作者自览不计（与帖同律）
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu)).andReturn();
+        assertThat(itemCachePeek(id)).isZero();
+        // 他人真实浏览：计数 + 展示即时含本次（DB 还是 0，响应应见 1）
+        MvcResult r = mockMvc.perform(get("/api/items/" + id)
+                        .header("Authorization", "Bearer " + login(MGR))).andReturn();
+        assertThat(envelope(r).path("data").path("viewCount").asInt()).isEqualTo(1);
+        // 同访客复访：不涨（缓冲与展示都保持 1）
+        MvcResult r2 = mockMvc.perform(get("/api/items/" + id)
+                        .header("Authorization", "Bearer " + login(MGR))).andReturn();
+        assertThat(envelope(r2).path("data").path("viewCount").asInt()).isEqualTo(1);
     }
 
     @Test

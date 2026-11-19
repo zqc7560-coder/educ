@@ -9,8 +9,9 @@ export function listPosts(params) {
   // {boardId,keyword,status,mine,sort,pageNum,pageSize}
   return request.get('/forum/posts', { params })
 }
-export function fetchPost(id) {
-  return request.get(`/forum/posts/${id}`)
+/** 帖详情（countView=false 用于收藏页/编辑页等非浏览场景，不计浏览量） */
+export function fetchPost(id, { countView = true } = {}) {
+  return request.get(`/forum/posts/${id}`, countView ? {} : { params: { pv: 0 } })
 }
 export function createPost(data) {
   return request.post('/forum/posts', data)

@@ -152,9 +152,10 @@ public class ForumService {
     }
 
     /** 详情：待审/下架的可见性矩阵；浏览计数排除作者自览 + 按访客 24h 去重 */
-    public PostVO detail(LoginUser me, Long id, String viewerKey) {
+    public PostVO detail(LoginUser me, Long id, String viewerKey, boolean countView) {
         ForumPost post = requireVisible(me, id);
-        if ((me == null || !post.getUserId().equals(me.getUserId()))
+        if (countView
+                && (me == null || !post.getUserId().equals(me.getUserId()))
                 && viewOnceGate.shouldCount("post", id, viewerKey)) {
             postMapper.update(null, new LambdaUpdateWrapper<ForumPost>()
                     .eq(ForumPost::getId, id).setSql("view_count = view_count + 1"));

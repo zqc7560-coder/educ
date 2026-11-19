@@ -1,9 +1,10 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟 101 断言（真接口+真浏览器混合）
+ * 校园失物招领系统 · 全功能端到端冒烟 104 断言（真接口+真浏览器混合）
  * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
  * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏(含
  *       服务端态回读)→举报工单→两段式上传→编辑重审→治理口→看板→消息→
- *       游客视角+登录页游客入口→卡片封面轮播→浏览按访客去重(物品/帖/公告)→
+ *       游客视角+登录页游客入口→卡片封面轮播→浏览三律·三域同口径
+ *       (访客去重/作者自览不计/pv=0 非浏览读不计/展示即时)→
  *       未审核内容互动闸（收藏/点赞/回复+归一 replyToId 闸，管理员同闸）
  * 纪律：同号重登会按"登录水位"踢掉在先令牌——复用 token 的段落禁止中途重登，
  *       需要新身份就注册新号；回复防刷 10s 窗同理，一段一号只发一贴。
@@ -154,9 +155,30 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const c2 = (await api('/forum/posts/201', { tok: vTok1 })).data?.viewCount ?? 0;   // 甲首读：+1
     const c3 = (await api('/forum/posts/201', { tok: vTok2 })).data?.viewCount ?? 0;   // 乙三读：仍不加
     ok('★帖浏览同人复刷不重复计数(甲乙各只+1)', c1 === c0 && c2 === c1 + 1 && c3 === c2, `c0=${c0} c1=${c1} c2=${c2} c3=${c3}`);
-    // 物品侧行为一致性：详情响应带 viewCount 字段（批刷滞后属 M9 展示口径），去重逻辑 JUnit ItemApiM3Test 钉死
-    const itv = await api('/items/101', { tok: vTok1 });
-    ok('物品详情可读且带 viewCount', typeof itv.data?.viewCount === 'number', JSON.stringify(itv.data?.viewCount));
+    // 物品浏览三律（与帖/公告同口径收齐——用户报"物品还有漏洞"根修）：
+    // 新发一件全新物品，所有计数从 0 起，观测量纯净
+    const ownNo = 'f' + STAMP.slice(-8);
+    await register(ownNo, '物品浏览甲' + STAMP);
+    const ownTok = (await api('/auth/login', { body: { studentNo: ownNo, password: PWD } })).data?.token;
+    const nv = await api('/items', { tok: ownTok, body: {
+      type: 'FOUND', title: '浏览三律件' + STAMP, description: '物品浏览量三律验证专用物品描述。', categoryId: 1,
+      happenedAt: new Date(Date.now() - 3600e3).toISOString().slice(0, 19), verifyQuestion: '什么颜色？' } });
+    const nvid = nv.data?.id;
+    await api(`/items/${nvid}/status?target=1`, { tok: adminTok, method: 'PATCH' });
+    // ① 作者自览不计（帖同律，物品此前漏了）
+    const a0 = (await api(`/items/${nvid}`, { tok: ownTok })).data?.viewCount;
+    ok('★物品作者自览不计数', a0 === 0, 'got ' + a0);
+    // ② 他人真实浏览：展示即时=DB+缓冲（此前滞后 5min 批刷=用户看到"乱涨"的观感源）
+    const b1 = (await api(`/items/${nvid}`, { tok: vTok1 })).data?.viewCount;
+    ok('★物品首读展示即见 +1(不再滞后批刷)', b1 === 1, 'got ' + b1);
+    // ③ 同人复访不涨
+    const b2 = (await api(`/items/${nvid}`, { tok: vTok1 })).data?.viewCount;
+    const b3 = (await api(`/items/${nvid}`, { tok: vTok1 })).data?.viewCount;
+    ok('物品同人复刷不涨', b2 === 1 && b3 === 1, `${b1}→${b2}→${b3}`);
+    // ④ ?pv=0 非浏览读（收藏页/编辑页）不涨且展示仍准
+    const b4 = (await api(`/items/${nvid}?pv=0`, { tok: vTok2 })).data?.viewCount;
+    const b5 = (await api(`/items/${nvid}`, { tok: vTok2 })).data?.viewCount;
+    ok('pv=0 非浏览读不计且展示正确', b4 === 1 && b5 === 2, `pv0=${b4} then=${b5}`);
   }
 
   // ---------- 7. 论坛：发帖→未发布闸（收藏/点赞/回复全拒）→审核通过→可互动 ----------
@@ -410,6 +432,9 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const multiImgs = (hall.data?.list || []).filter(x => (x.images || []).length > 1);
     ok('列表带有序 images 图集且存在多图件(卡片轮播源)', multiImgs.length >= 1, 'multi=' + multiImgs.length);
     ok('多图件首图=coverUrl(轮播从封面起)', multiImgs.every(x => x.images[0] === x.coverUrl));
+    // 多图件(203 耳机一只,3图)可能被测试期间新建物品挤出首屏——临时置顶保证进 UI，
+    // 断言完还原（top 治理口本就是置顶优先排序）
+    await api('/items/203/top', { tok: mgrTok, method: 'PATCH' });
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1500);
     const coverImgs = await page.locator('.grid .card .cover-img').count();
@@ -433,6 +458,7 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
       return cards.some(c => !c.querySelector('.cover-carousel') && c.querySelector('a.cover-box .cover-img'));
     });
     ok('单图卡片为静态图(不轮播)', singleStatic);
+    await api('/items/203/top', { tok: mgrTok, method: 'PATCH' });   // 还原置顶位
 
     // 治理者回复闸：管理员回复他人待审帖 → 拒绝
     const gateNo = '7' + STAMP.slice(-8);

@@ -11,8 +11,9 @@ export function listItems(params) {
 }
 
 /** 详情（自动计数；404 由拦截器 toast，页面处理 reject） */
-export function fetchItem(id) {
-  return request.get(`/items/${id}`)
+/** 详情（countView=false 用于收藏页/编辑页等非浏览场景，不计浏览量） */
+export function fetchItem(id, { countView = true } = {}) {
+  return request.get(`/items/${id}`, countView ? {} : { params: { pv: 0 } })
 }
 
 /** 详情页相似推荐 Top5（同分类+时间窗+地点+文本重合度打分） */

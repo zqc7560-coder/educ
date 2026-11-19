@@ -73,6 +73,7 @@ public class ItemController {
     @Operation(summary = "物品详情")
     @GetMapping("/{id}")
     public Result<ItemVO> detail(@PathVariable Long id, @AuthenticationPrincipal LoginUser me,
+                                 @RequestParam(defaultValue = "1") int pv,
                                  jakarta.servlet.http.HttpServletRequest request) {
         // 浏览去重身份：登录者按 uid；游客按真实来源 IP（nginx 已注入 X-Real-IP）
         String viewerKey;
@@ -82,7 +83,7 @@ public class ItemController {
             String rip = request.getHeader("X-Real-IP");
             viewerKey = "ip:" + (rip == null || rip.isBlank() ? request.getRemoteAddr() : rip);
         }
-        return Result.ok(itemService.detail(id, me, viewerKey));
+        return Result.ok(itemService.detail(id, me, viewerKey, pv != 0));
     }
 
     /**

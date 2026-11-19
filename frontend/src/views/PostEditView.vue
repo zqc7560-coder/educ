@@ -24,7 +24,7 @@ onMounted(async () => {
   boards.value = await fetchCategories('BOARD').catch(() => [])
   if (isEdit.value) {
     try {
-      const p = await fetchPost(id.value)
+      const p = await fetchPost(id.value, { countView: false })
       form.boardId = p.boardId
       form.title = p.title
       form.content = p.content

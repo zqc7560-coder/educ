@@ -39,7 +39,7 @@ async function load() {
   areas.value = await fetchAreas().catch(() => [])
   if (isEdit.value) {
     try {
-      const it = await fetchItem(id.value)
+      const it = await fetchItem(id.value, { countView: false })
       if (it.userId !== undefined) {
         Object.assign(form, {
           type: it.type, title: it.title, description: it.description,

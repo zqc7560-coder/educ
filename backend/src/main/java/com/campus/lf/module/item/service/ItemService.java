@@ -172,33 +172,48 @@ public class ItemService {
         return assemblePage(itemMapper.selectPage(new Page<>(pageNum, pageSize), qw));
     }
 
-    /** 详情（GET /api/items/{id}）：可见性矩阵 + 浏览计数 + 登录态字段脱敏分级 */
-    public ItemVO detail(Long id, LoginUser me, String viewerKey) {
-        // M9 读路径。缓存安全前提=「任何人读到的完全一致」，本系统只有游客视图满足
-        // （contact 登录才填充）——所以缓存只罩 me=null 分支：游客吃缓存（全站最大读
-        // 流量），登录者直查 DB 走完整可见性矩阵。回填同理只在游客读路径做，
-        // 且仅发布态（待审/下架对作者要求"所见即最新"，缓存制造改而未生效假象）。
-        if (me == null) {
-            ItemVO cached = cache.getDetail(id);
-            if (cached != null) {
-                if (viewOnceGate.shouldCount("item", id, viewerKey)) {
-                    cache.countPv(id);
-                }
-                return cached;
+    /**
+     * 详情（GET /api/items/{id}）：可见性矩阵 + 浏览计数 + 登录态字段脱敏分级。
+     *
+     * <p>浏览计数与帖/公告完全同口径（用户要求对齐）：
+     * <ol>
+     *   <li><b>真实浏览才计数</b>：?pv=0 的"非浏览读"（收藏页解析、编辑页取数）不动计数；</li>
+     *   <li><b>作者自览不计</b>：与论坛帖同律（此前物品漏排除——作者反复点开自己物品会涨）；</li>
+     *   <li><b>24h 访客去重</b>：登录 u:{uid}、游客 ip:{X-Real-IP}，同人多刷只 +1（ViewOnceGate）；</li>
+     *   <li><b>展示即时</b>：viewCount = DB + 未落盘 Redis 缓冲（含本次），与帖/公告"点开即见
+     *       +1、再刷不涨"的观感一致（此前只回 DB 快照，滞后 5 分钟批刷造成"数字乱跳"错觉）。</li>
+     * </ol>
+     * 缓存只罩游客发布态视图（contact 登录才填充；写路径 evictTx 双删不变）。
+     */
+    public ItemVO detail(Long id, LoginUser me, String viewerKey, boolean countView) {
+        ItemVO vo;
+        ItemVO cached = me == null ? cache.getDetail(id) : null;
+        if (cached != null) {
+            vo = cached;   // 缓存存的是 DB 快照值，展示值下方统一重刷
+        } else {
+            LostItem item = requireItem(id);
+            assertReadable(item, me);
+            vo = assemble(item, me, true);
+            if (me == null && item.getStatus() == STATUS_PUBLISHED) {
+                cache.putDetail(id, vo);   // 先存快照（setViewCount 在其后，不污染缓存）
             }
         }
-        LostItem item = requireItem(id);
-        assertReadable(item, me);
-        // PV 计数在可见性闸之后：404/403 路径不计数——"看不见的东西被浏览"
-        // 会污染趋势数据（博客 M9 同口径）。按访客去重（用户要求）：登录者 u:{id}、
-        // 游客 ip:{X-Real-IP}，24h 窗口内同人多刷只 +1
-        if (viewOnceGate.shouldCount("item", id, viewerKey)) {
-            cache.countPv(id);
+        // 计数 + 展示重刷都只打在"两列轻查"上（view_count/user_id，不碰大字段）
+        LostItem row = itemMapper.selectOne(new LambdaQueryWrapper<LostItem>()
+                .select(LostItem::getUserId, LostItem::getViewCount)
+                .eq(LostItem::getId, id));
+        if (row == null) {
+            return vo;   // 并发删除：快照照给，不计数
         }
-        ItemVO vo = assemble(item, me, true);
-        if (me == null && item.getStatus() == STATUS_PUBLISHED) {
-            cache.putDetail(id, vo);   // vo 此刻即游客视图（me=null 装配），无个人字段
+        if (countView) {
+            boolean selfView = me != null && me.getUserId().equals(row.getUserId());
+            if (!selfView && viewOnceGate.shouldCount("item", id, viewerKey)) {
+                cache.countPv(id);
+            }
         }
+        // 展示恒为 DB+未落盘缓冲（pv=0 的非浏览读同样见准确数——收藏页卡片不至于显示偏低）
+        vo.setViewCount((row.getViewCount() == null ? 0 : row.getViewCount())
+                + (int) cache.peekCounter(com.campus.lf.module.item.service.ItemCacheService.PV_PREFIX + id));
         return vo;
     }
 

@@ -223,11 +223,13 @@ class CacheApiM9Test {
         String stu = login(STU_A);
         long id = createPublished(stu, login(STU_B), "PV样本");
 
-        // 浏览去重（用户要求：同一访客多次点击只 +1）：同 IP 游客两读只计 1；
-        // 登录者是另一访客身份（u:uid）另计 1 —— 共 2
+        // 浏览三律（与帖/公告对齐）：①同访客两读只计 1 ②作者自览不计数
+        // ③他人登录读(u:uid 另一身份)计数 —— 共 2
+        String stuB = login(STU_B);
         mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读1（回源，计数）
         mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读2（同 ip，去重不计数）
-        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu)).andReturn(); // 登录读（u:1 计数）
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu)).andReturn(); // 作者自览→不计数
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stuB)).andReturn(); // 他人读→计数
         assertThat(cache.peekCounter(ItemCacheService.PV_PREFIX + id)).isEqualTo(2);
 
         int dbBefore = itemMapper.selectById(id).getViewCount();
