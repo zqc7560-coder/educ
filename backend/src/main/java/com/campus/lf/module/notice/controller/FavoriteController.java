@@ -50,8 +50,12 @@ public class FavoriteController {
         }
         Long targetId = targetIdNum.longValue();
         // 目标存在性：收藏不存在的物品=孤儿键，列表渲染时反查空行
-        if (TYPE_ITEM.equals(targetType) && itemMapper.selectById(targetId) == null) {
-            throw new BizException(BizCode.ITEM_NOT_FOUND, BizCode.ITEM_NOT_FOUND.getMessage(), 404);
+        com.campus.lf.module.item.entity.LostItem targetItem = null;
+        if (TYPE_ITEM.equals(targetType)) {
+            targetItem = itemMapper.selectById(targetId);
+            if (targetItem == null) {
+                throw new BizException(BizCode.ITEM_NOT_FOUND, BizCode.ITEM_NOT_FOUND.getMessage(), 404);
+            }
         }
         LambdaQueryWrapper<UserFavorite> w = new LambdaQueryWrapper<UserFavorite>()
                 .eq(UserFavorite::getUserId, me.getUserId())
@@ -62,8 +66,13 @@ public class FavoriteController {
             favoriteMapper.deleteById(existing.getId());
             return Result.ok(Map.of("favorited", false));
         }
-        // 新增收藏才过状态闸（取消收藏不受限）：未发布（待审/下架）的帖子不可收藏——
-        // 与点赞(5001)/回复(5008)同口径，防"作者自己收藏待审帖养权重"与列表反查空行
+        // 新增收藏才过状态闸（取消收藏不受限）：待审/已下架的内容一律不可收藏/点赞——
+        // 物品与帖子同口径（此前物品分支漏闸，管理员可收藏待审件即此 bug），
+        // 防"作者自己收藏待审内容养权重"与列表反查空行
+        if (TYPE_ITEM.equals(targetType)
+                && targetItem.getStatus() != com.campus.lf.module.item.service.ItemService.STATUS_PUBLISHED) {
+            throw new BizException(BizCode.ITEM_STATUS_INVALID, "物品未发布，暂不可收藏");
+        }
         if (TYPE_POST.equals(targetType)) {
             com.campus.lf.module.forum.entity.ForumPost post = postMapper.selectById(targetId);
             if (post == null) {

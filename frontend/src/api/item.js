@@ -15,6 +15,11 @@ export function fetchItem(id) {
   return request.get(`/items/${id}`)
 }
 
+/** 首页图片轮播帧（公开；仅已发布带图件，看图认物） */
+export function fetchCarousel() {
+  return request.get('/items/carousel')
+}
+
 /** 详情页相似推荐 Top5（同分类+时间窗+地点+文本重合度打分） */
 export function fetchSimilarItems(id) {
   return request.get(`/items/${id}/similar`)

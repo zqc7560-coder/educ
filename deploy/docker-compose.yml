@@ -128,6 +128,10 @@ services:
       - ../frontend/dist:/usr/share/nginx/html:ro
       # 与后端共享 uploads 卷：图片由后端写入、Nginx 直出（带缓存头）
       - uploads:/usr/share/nginx/uploads:ro
+      # 演示图片（随仓库走，down -v 重置卷也不丢）：独立挂载点，
+      # 由 lf.conf 的 /uploads/demoimg 长前缀 location 直出（uploads 卷根下
+      # 再挂子目录会在只读 rootfs 上 mkdir 失败——实测）
+      - ./demo/imgs:/usr/share/nginx/demoimg:ro
     restart: unless-stopped
     depends_on:
       lf-server: { condition: service_healthy }

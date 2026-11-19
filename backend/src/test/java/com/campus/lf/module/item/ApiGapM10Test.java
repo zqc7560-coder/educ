@@ -133,6 +133,10 @@ class ApiGapM10Test {
     void favoriteToggle() throws Exception {
         String stu = login(STU_A);
         long id = createItem(stu, "收藏样本");
+        // 收藏闸（本类 favoriteItemGate 钉）：待审件不可收藏——此用例先过审再测 toggle 幂等
+        mockMvc.perform(patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + login(MGR)))
+                .andExpect(jsonPath("$.code").value(0));
         mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
                         .contentType(MediaType.APPLICATION_JSON)
                         .content("{\"targetType\":\"ITEM\",\"targetId\":" + id + "}"))
@@ -215,6 +219,71 @@ class ApiGapM10Test {
                                 + "\"categoryId\":1,\"happenedAt\":\"2026-11-11T10:00:00\","
                                 + "\"imageUrls\":[" + urls + "]}"))
                 .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
+    @DisplayName("收藏/点赞同闸补全：待审物品不可收藏(2005 前后端同口径)；下架件也不可；已发布可")
+    void favoriteItemGate() throws Exception {
+        String stu = login(STU_A);
+        String mgr = login(MGR);
+        long pending = createItem(stu, "闸测待审件");   // item_audit=1 → status=0
+        // 管理员也不能收藏待审件（用户实测 bug 回归钉：治理身份同样被闸）
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + pending + "}"))
+                .andExpect(jsonPath("$.code").value(BizCode.ITEM_STATUS_INVALID.getCode()));
+        // 过审后放行
+        mockMvc.perform(patch("/api/items/" + pending + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + pending + "}"))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+        // 下架后再新增收藏又被拒（取消已有收藏不受限=上面 favorited true 的 toggle 反向仍通）
+        mockMvc.perform(patch("/api/items/" + pending + "/status").param("target", "2")
+                        .param("reason", "闸测下架").header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.code").value(0));
+        // 已持有收藏者（mgr）取消不受状态限制
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + pending + "}"))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+        // 下架件再新增收藏被拒（stu 此前未收藏过）
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + pending + "}"))
+                .andExpect(jsonPath("$.code").value(BizCode.ITEM_STATUS_INVALID.getCode()));
+    }
+
+    @Test
+    @DisplayName("首页轮播口：游客可访问；仅已发布带图件成帧；待审/无图件不进轮播")
+    void carouselPublic() throws Exception {
+        // 游客直访（PUBLIC_GETS /api/items/* 覆盖 carousel 的登记回归钉：忘登记=401）
+        MvcResult r0 = mockMvc.perform(get("/api/items/carousel")).andReturn();
+        assertThat(envelope(r0).path("code").asInt()).isEqualTo(0);
+
+        String stu = login(STU_A);
+        String mgr = login(MGR);
+        long pub = createItem(stu, "轮播在线件");
+        mockMvc.perform(patch("/api/items/" + pub + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
+        long pend = createItem(stu, "轮播待审件");   // 保持待审
+
+        // 直挂图（绕过上传口，只测读取逻辑）：两件各一张首图
+        for (long id : new long[]{pub, pend}) {
+            jdbcTemplate.update("insert into item_image(item_id,url,sort_order,created_at,deleted) values(?,?,0,CURRENT_TIMESTAMP,0)",
+                    id, "/uploads/demoimg/card.png");
+        }
+        MvcResult r1 = mockMvc.perform(get("/api/items/carousel")).andReturn();
+        String data = envelope(r1).path("data").toString();
+        assertThat(data).contains("轮播在线件");
+        assertThat(data).doesNotContain("轮播待审件");   // 待审图不得上首页
+        // 帧结构：itemId/url/type/title 齐备
+        var arr = envelope(r1).path("data");
+        for (var f : arr) {
+            assertThat(f.hasNonNull("itemId") && f.hasNonNull("url") && f.hasNonNull("title")).isTrue();
+        }
     }
 
     @Test

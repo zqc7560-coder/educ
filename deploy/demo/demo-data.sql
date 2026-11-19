@@ -18,6 +18,7 @@ DELETE FROM forum_reply      WHERE id BETWEEN 201 AND 218;
 DELETE FROM forum_post       WHERE id BETWEEN 201 AND 212;
 DELETE FROM lost_item        WHERE id BETWEEN 201 AND 222;
 DELETE FROM notification     WHERE id BETWEEN 201 AND 212;
+DELETE FROM item_image       WHERE id BETWEEN 201 AND 216;
 DELETE FROM sys_user_role    WHERE user_id IN (SELECT id FROM sys_user WHERE student_no IN ('2023508094','2023508095','2023508096'));
 DELETE FROM sys_user         WHERE student_no IN ('2023508094','2023508095','2023508096');
 -- （防 email 唯一键撞种子账号：演示 email 用 demo 前缀）
@@ -81,6 +82,19 @@ INSERT INTO lost_item (id, type, title, description, category_id, campus_id, bui
    NOW(), '三号楼一层失物中心', '卡套上印的是什么角色？', @ua, 1, NULL, 4, 0, 0, 0, 0, NOW()),
   (222, 'LOST', '运动水壶（黑色大容量）', '在体育馆跑步机上落下的大水壶，壶身有"HEAVY USER"贴纸。', 5, 2, 14, '二楼跑步机区',
    NOW(), 'tel_138****0011', NULL, 1, 1, NULL, 30, 0, 0, 0, 0, NOW());
+
+
+-- ---------- 2b) 演示图片（bind 挂载直出 /uploads/demoimg/*，down -v 不丢） ----------
+-- 轮播取"已发布带图件"首图：8 件配图 → 首页 8 帧（置顶优先排序）
+INSERT INTO item_image (id, item_id, url, sort_order) VALUES
+  (201, 201, '/uploads/demoimg/card.png', 0),      -- 一卡通
+  (202, 203, '/uploads/demoimg/earbud.png', 0),    -- 耳机一只
+  (203, 205, '/uploads/demoimg/book.png', 0),      -- 高数课本
+  (204, 207, '/uploads/demoimg/jacket.png', 0),    -- 黑色羽绒服
+  (205, 209, '/uploads/demoimg/umbrella.png', 0),  -- 透明长柄伞
+  (206, 211, '/uploads/demoimg/card.png', 0),      -- 学生证
+  (207, 218, '/uploads/demoimg/wallet.png', 0),    -- 棕色钱包（置顶件）
+  (208, 222, '/uploads/demoimg/bottle.png', 0);    -- 运动水壶
 
 -- ---------- 3) 认领单 7 张（6 态）+ 留痕 ----------
 INSERT INTO item_claim (id, item_id, claimant_id, answer, evidence_note, status, reject_reason, arbitrated_by, handled_at, version, created_at) VALUES

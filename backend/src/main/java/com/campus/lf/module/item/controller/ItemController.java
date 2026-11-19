@@ -133,6 +133,13 @@ public class ItemController {
         return Result.ok();
     }
 
+    /** GET /api/items/carousel：首页图片轮播帧（公开；仅已发布带图件，置顶优先） */
+    @Operation(summary = "首页图片轮播（看图认物）")
+    @GetMapping("/carousel")
+    public Result<java.util.List<java.util.Map<String, Object>>> carousel() {
+        return Result.ok(itemService.carousel(8));
+    }
+
     /** GET /api/items/{id}/similar：详情页相似推荐 Top5（公开，仅已发布件有结果） */
     @Operation(summary = "相似物品推荐（同分类+时间窗+地点+文本重合度）")
     @GetMapping("/{id}/similar")

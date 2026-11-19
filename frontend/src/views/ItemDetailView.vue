@@ -129,7 +129,8 @@ const statusCls = computed(() => {
             {{ item.status === 0 ? '待审核' : '已下架' }}
           </el-tag>
           <span class="cat">{{ item.categoryName || '未分类' }}</span>
-          <el-button class="fav" link @click="toggleFav">{{ fav ? '★ 已收藏' : '☆ 收藏' }}</el-button>
+          <!-- 未过审内容不可收藏：按钮直接隐藏（后端 2005/5008 硬闸兜底） -->
+          <el-button v-if="live" class="fav" link @click="toggleFav">{{ fav ? '★ 已收藏' : '☆ 收藏' }}</el-button>
         </div>
 
         <h1 class="title">{{ item.title }}</h1>
