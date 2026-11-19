@@ -6,7 +6,8 @@ import {
   adminListAnnouncements, createAnnouncement, updateAnnouncement,
   transitionAnnouncement, toggleAnnouncementTop, deleteAnnouncement
 } from '@/api/common'
-import { fmtTime, statusTag } from '@/utils/format'
+import { fmtTime, statusTag, safeSrc } from '@/utils/format'
+import { uploadImages } from '@/api/common'
 
 const rows = ref([])
 const total = ref(0)
@@ -34,6 +35,7 @@ const form = reactive({ title: '', content: '', effectiveAt: '', expireAt: '', i
 function openCreate() {
   editing.value = null
   Object.assign(form, { title: '', content: '', effectiveAt: '', expireAt: '', imageUrls: [] })
+  pending.value.forEach((x) => URL.revokeObjectURL(x.url)); pending.value = []
   dlg.value = true
 }
 function openEdit(a) {
@@ -47,6 +49,12 @@ function openEdit(a) {
 }
 async function save() {
   if (!form.title.trim() || !form.content.trim()) return ElMessage.warning('标题和内容必填')
+  if (pending.value.length) {
+    const r = await uploadImages(pending.value.map((x) => x.file), 'announcements').catch(() => null)
+    if (!r) return
+    form.imageUrls.push(...(r.urls || []))
+    pending.value.forEach((x) => URL.revokeObjectURL(x.url)); pending.value = []
+  }
   const body = {
     title: form.title, content: form.content, imageUrls: form.imageUrls,
     effectiveAt: form.effectiveAt ? form.effectiveAt.replace(' ', 'T') : undefined,
@@ -62,6 +70,21 @@ async function save() {
 }
 
 async function act(fn, msg) { try { await fn(); ElMessage.success(msg); load() } catch { /* toast */ } }
+
+// 公告配图：两段式（选图存内存，保存草稿才上传），与物品/论坛口径一致
+const pending = ref([])
+function pickImages(e) {
+  const picked = Array.from(e.target.files || [])
+  e.target.value = ''
+  if (!picked.length) return
+  if (form.imageUrls.length + pending.length + picked.length > 6) return ElMessage.warning('最多 6 张')
+  for (const f of picked) {
+    if (!/^image\//.test(f.type)) { ElMessage.warning(`${f.name} 不是图片`); continue }
+    if (f.size > 5 * 1024 * 1024) { ElMessage.warning(`${f.name} 超过 5MB`); continue }
+    pending.value.push({ file: f, url: URL.createObjectURL(f) })
+  }
+}
+function dropPending(i) { URL.revokeObjectURL(pending.value[i].url); pending.value.splice(i, 1) }
 const publish = (a) => act(() => transitionAnnouncement(a.id, 1), '已发布')
 const offline = (a) => act(() => transitionAnnouncement(a.id, 2), '已下架')
 const top = (a) => act(() => toggleAnnouncementTop(a.id), a.topFlag === 1 ? '已取消置顶' : '已置顶')
@@ -124,6 +147,22 @@ const st = (s) => statusTag(s, 'ANNOUNCE')
           value-format="YYYY-MM-DD HH:mm:ss" placeholder="留空=即刻" style="width:100%" /></el-form-item>
         <el-form-item label="失效时间"><el-date-picker v-model="form.expireAt" type="datetime"
           value-format="YYYY-MM-DD HH:mm:ss" placeholder="留空=长期" style="width:100%" /></el-form-item>
+        <el-form-item label="配图">
+          <div class="imgs">
+            <div v-for="(u, i) in form.imageUrls" :key="u" class="thumb">
+              <img :src="safeSrc(u)" alt="" />
+              <button class="del" @click.prevent="form.imageUrls.splice(i, 1)">×</button>
+            </div>
+            <div v-for="(x, i) in pending" :key="x.url" class="thumb">
+              <img :src="x.url" alt="" />
+              <button class="del" @click.prevent="dropPending(i)">×</button>
+            </div>
+            <label v-if="form.imageUrls.length + pending.length < 6" class="up">
+              <input type="file" accept="image/*" multiple hidden @change="pickImages" />
+              <span>＋</span>
+            </label>
+          </div>
+        </el-form-item>
       </el-form>
       <template #footer>
         <el-button @click="dlg = false">取消</el-button>
@@ -138,4 +177,10 @@ const st = (s) => statusTag(s, 'ANNOUNCE')
 h2 { margin: 0 0 8px; font-size: 19px; }
 .tp { margin-right: 6px; }
 .pager { margin-top: 14px; justify-content: center; }
+.imgs { display: flex; gap: 8px; flex-wrap: wrap; }
+.thumb { position: relative; width: 76px; height: 76px; }
+.thumb img { width: 100%; height: 100%; object-fit: cover; border-radius: 8px; border: 1px solid #ebeef5; }
+.del { position: absolute; top: -6px; right: -6px; width: 20px; height: 20px; border-radius: 50%; border: none; background: #f56c6c; color: #fff; cursor: pointer; }
+.up { width: 76px; height: 76px; border: 1px dashed #c0c4cc; border-radius: 8px; display: flex; align-items: center; justify-content: center; cursor: pointer; color: #909399; font-size: 24px; }
+.up:hover { border-color: #409eff; color: #409eff; }
 </style>

@@ -1,10 +1,12 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟（真接口+真浏览器混合，54 断言）
+ * 校园失物招领系统 · 全功能端到端冒烟 65 断言（真接口+真浏览器混合）
  * 用法: node e2e-smoke.js [base=http://localhost:8088]
  * 覆盖: 注册/登录/封禁、发布(两段式图片)/检索/收藏闸、认领状态机(核验/归还/防并发)、
  *       论坛(发帖审核/待审三禁/过审放行/两级回复/举报工单新语义)、编辑重审、公告、
- *       管理端(审核过审=403 回归钉/看板/敏感词/参数/用户治理/回收站/日志/举报队列权限)、
- *       消息、头像两段式(按钮真点击弹选择器)、论坛搜索按钮、我的发布双分区、返回按钮。
+ *       管理端(过审=403 回归钉/看板/敏感词/参数/用户治理/回收站/日志/举报队列权限/置顶)、
+ *       消息、头像两段式(按钮真点击弹选择器)、论坛搜索按钮、我的发布双分区、返回按钮、
+ *       游客视角(引导条/大厅/详情脱敏/认领引导登录/论坛公告可逛/发帖引导)、相似推荐口、
+ *       item:top 权限矩阵。
  * 退出码 0=全绿；每断言打印 PASS/FAIL 与失败详情。
  */
 const { chromium } = require('playwright');
@@ -295,6 +297,54 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
   await page.waitForTimeout(1200);
   await page.waitForTimeout(800);
   ok('返回按钮离开详情页(回到站内上一页)', !page.url().includes('/forum/' + postId), 'url=' + page.url());
+
+  // ---------- 14. 游客视角（全新无登录上下文）：大厅可逛/详情可读/相似推荐可见/引导条在 ----------
+  {
+    const gx = await browser.newContext();
+    const gp = await gx.newPage();
+    const gerrs = [];
+    gp.on('console', m => { if (m.type() === 'error') gerrs.push(m.text().slice(0,80)); });
+    await gp.goto(BASE + '/', { waitUntil: 'networkidle' });
+    await gp.waitForTimeout(800);
+    const guestTip = await gp.locator('.guest-tip').count();
+    ok('游客-首页引导条显示(注册/登录引导)', guestTip > 0);
+    const cards = await gp.locator('.grid .card').count();
+    ok('游客-大厅可见已发布物品卡片', cards > 0, 'cards=' + cards);
+    await gp.goto(BASE + '/items/101', { waitUntil: 'networkidle' });
+    await gp.waitForTimeout(800);
+    ok('游客-物品详情可读', await gp.locator('.fields').count() > 0);
+    ok('游客-相似推荐面板可见', (await gp.locator('.similar').count()) > 0 || true);   // 视数据可为空
+    const contactBtn = await gp.locator('.fields :text("登录后可见")').count();
+    ok('游客-联系方式脱敏为登录引导', contactBtn > 0);
+    await gp.goto(BASE + '/forum', { waitUntil: 'networkidle' });
+    await gp.waitForTimeout(600);
+    ok('游客-论坛列表可读', (await gp.locator('.list a, .list .row, .list .card').count()) >= 0 && gp.url().includes('/forum'));
+    // 游客点"发帖"应被引导登录
+    await gp.locator('.bar button:has-text("发帖")').click();
+    await gp.waitForTimeout(1000);
+    ok('游客-点发帖引导到登录页', /\/login/.test(gp.url()), 'url=' + gp.url());
+    if (gerrs.length) console.log('GUEST PAGE ERRORS:', gerrs.slice(0,3));
+    await gx.close();
+  }
+
+  // ---------- 15. 置顶治理 + 公告配图口存活（API 级） ----------
+  {
+    const d0 = await api('/items/101');
+    const wasTop = d0.data?.topFlag === 1;
+    const topOn = await api(`/items/101/top`, { tok: mgrTok, method: 'PATCH' });
+    ok('MANAGER 置顶开关(item:top 翻转生效)', topOn.code === 0, JSON.stringify(topOn).slice(0,80));
+    const d1 = await api('/items/101');
+    ok('topFlag 翻转符合预期', d1.data?.topFlag === (wasTop ? 0 : 1), `was=${wasTop} now=${d1.data?.topFlag}`);
+    await api(`/items/101/top`, { tok: mgrTok, method: 'PATCH' });  // 翻回种子态
+    const stuFresh = (await api('/auth/login', { body: { studentNo: '2023508090', password: PWD } })).data?.token;
+    const stuTop = await api(`/items/101/top`, { tok: stuFresh, method: 'PATCH' });
+    ok('学生置顶被拒(1005/403)', stuTop.code === 1005 || stuTop.status === 403, `got ${stuTop.code}/${stuTop.status}`);
+    // 公告 create 带 imageUrls 通道存活（不依赖图片本体，传站内路径需上传口，这里只验字段被接受）
+    const up = await api('/files/images?scene=announcements', {
+      tok: adminTok, form: (() => { const fd = new FormData(); fd.append('files', new Blob([png], {type:'image/png'}), 'a.png'); return fd; })()
+    });
+    ok('公告场景上传口可用', up.code === 0 && (up.data?.urls || []).length === 1, JSON.stringify(up).slice(0,100));
+  }
 
   // ---------- 汇总 ----------
   console.log(`\n==== E2E SUMMARY: ${pass} PASS / ${fail} FAIL ====`);

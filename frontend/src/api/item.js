@@ -15,6 +15,16 @@ export function fetchItem(id) {
   return request.get(`/items/${id}`)
 }
 
+/** 详情页相似推荐 Top5（同分类+时间窗+地点+文本重合度打分） */
+export function fetchSimilarItems(id) {
+  return request.get(`/items/${id}/similar`)
+}
+
+/** 置顶/取消置顶（治理，item:top） */
+export function toggleItemTop(id) {
+  return request.patch(`/items/${id}/top`)
+}
+
 /** 发布/编辑共用形状（编辑必带 version；type 后端锁死不可改，页面 new 时选、edit 时禁用） */
 export function createItem(data) {
   return request.post('/items', data)

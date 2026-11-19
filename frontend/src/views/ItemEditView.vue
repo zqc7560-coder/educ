@@ -61,8 +61,8 @@ async function pickImages(e) {
   const picked = Array.from(e.target.files || [])
   e.target.value = ''
   if (!picked.length) return
-  if (form.imageUrls.length + pending.value.length + picked.length > 9)
-    return ElMessage.warning('最多 9 张')
+  if (form.imageUrls.length + pending.value.length + picked.length > 6)
+    return ElMessage.warning('最多 6 张')
   for (const f of picked) {
     if (!/^image\//.test(f.type)) { ElMessage.warning(`${f.name} 不是图片`); continue }
     if (f.size > 5 * 1024 * 1024) { ElMessage.warning(`${f.name} 超过 5MB`); continue }
@@ -187,12 +187,12 @@ async function submit() {
               <img :src="p.url" alt="" />
               <button class="del" @click.prevent="dropPending(i)">×</button>
             </div>
-            <label v-if="form.imageUrls.length + pending.length < 9" class="up">
+            <label v-if="form.imageUrls.length + pending.length < 6" class="up">
               <input type="file" accept="image/*" multiple hidden @change="pickImages" />
               <span>＋</span>
             </label>
           </div>
-          <div class="cnt">{{ form.imageUrls.length + pending.length }}/9 张（png/jpg/gif/webp，≤5MB）</div>
+          <div class="cnt">{{ form.imageUrls.length + pending.length }}/6 张（png/jpg/gif/webp，≤5MB）</div>
         </el-form-item>
 
         <el-form-item>

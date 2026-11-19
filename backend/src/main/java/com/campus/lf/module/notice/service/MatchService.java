@@ -38,9 +38,9 @@ import java.util.stream.Collectors;
 @RequiredArgsConstructor
 public class MatchService {
 
-    static final int MATCH_THRESHOLD = 30;
+    public static final int MATCH_THRESHOLD = 30;
     /** 检索窗口：只和近 30 天在架件比（陈旧件匹配意义低且省扫描） */
-    static final int CANDIDATE_WINDOW_DAYS = 30;
+    public static final int CANDIDATE_WINDOW_DAYS = 30;
 
     private final LostItemMapper itemMapper;
     private final NotificationService notificationService;
@@ -139,7 +139,7 @@ public class MatchService {
      * 极简分词：ASCII 连续段成词（小写），中文取字符 bigram（单字也保留，
      * 两字以下的短文本 bigram 会退化成单字集合——可接受，确定性优先）。
      */
-    static Set<String> tokenize(String text) {
+    public static Set<String> tokenize(String text) {
         if (text == null || text.isBlank()) {
             return Set.of();
         }

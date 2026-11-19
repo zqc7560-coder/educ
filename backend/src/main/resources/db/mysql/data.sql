@@ -91,3 +91,15 @@ INSERT IGNORE INTO announcement (id, title, content, status, top_flag, author_id
      1, 1, 2, 0);
 
 -- ---------- 演示物品/帖子：M1 只保证字典与治理面种子，业务演示数据随 M3/M5 测试补齐 ----------
+INSERT IGNORE INTO lost_item (id, type, title, description, category_id, campus_id, building_id,
+  location_text, happened_at, contact, verify_question, user_id, status, top_flag,
+  view_count, claim_count, like_count, version, published_at) VALUES
+  (101, 'FOUND', '黑色校园卡一张（三号楼捡）', '今晚在三号楼二楼水房捡到一张校园卡，卡面姓王，请失主认领时说明卡号后四位。', 1, 1, 12, '二楼水房',
+   DATE_SUB(NOW(), INTERVAL 1 DAY), 'wx_2023508090', '卡号后四位是多少？', 1, 1, 1, 12, 0, 0, 0, NOW()),
+  (102, 'LOST', '丢了白色耳机（图书馆三楼）', '昨天下午在图书馆三楼自习，离开时把白色无线耳机落在座位上了，耳机盒上有贴纸。', 2, 1, 13, '三楼靠窗',
+   DATE_SUB(NOW(), INTERVAL 2 DAY), 'qq_100001', NULL, 2, 1, 0, 8, 0, 0, 0, NOW()),
+  (103, 'FOUND', '一串钥匙（带蓝色小熊挂件）', '在体育馆门口捡到钥匙一串，约四五把，带蓝色小熊挂件，交至失物中心代管。', 6, 2, 14, '正门',
+   DATE_SUB(NOW(), INTERVAL 3 DAY), '三号楼一层服务台', '钥匙串上除了小熊挂件还有什么？', 1, 1, 0, 5, 0, 0, 0, NOW());
+
+INSERT IGNORE INTO forum_post (id, board_id, title, content, user_id, status, top_flag, view_count, reply_count, like_count, version, published_at) VALUES
+  (101, 12, '新生求问：宿舍钥匙丢了去哪里补办？', '昨天回宿舍发现钥匙丢了，请问是找宿管还是学校失物中心？大概多少钱？', 2, 1, 0, 20, 0, 0, 0, NOW());

@@ -19,6 +19,7 @@ const st = computed(() => statusTag(props.item.status))
 <template>
   <div class="card">
     <div class="head">
+      <el-tag v-if="item.topFlag === 1" size="small" type="danger" effect="dark">置顶</el-tag>
       <el-tag :type="typeColor" size="small" effect="dark">{{ typeLabel }}</el-tag>
       <el-tag v-if="showStatus" :type="st.type" size="small">{{ st.text }}</el-tag>
       <span class="cat">{{ item.categoryName || '未分类' }}</span>

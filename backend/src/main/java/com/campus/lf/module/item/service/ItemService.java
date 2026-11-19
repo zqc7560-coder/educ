@@ -296,6 +296,64 @@ public class ItemService {
     }
 
     /**
+     * 置顶/取消置顶（PATCH /api/items/{id}/top，治理口挂 item:top 权限点——
+     * 开题文档功能清单 P1"置顶"此前只有权限点种子、无执行体，现补齐）。
+     * 置顶件在列表"最新/最热"两种排序下均恒前排（pageItems 已按 top_flag 先序）。
+     */
+    @Transactional
+    public void toggleTop(LoginUser me, Long id) {
+        if (!me.getPerms().contains("item:top")) {
+            throw new BizException(BizCode.FORBIDDEN, BizCode.FORBIDDEN.getMessage(), 403);
+        }
+        LostItem item = requireItem(id);
+        LostItem patch = new LostItem();
+        patch.setId(item.getId());
+        patch.setTopFlag(item.getTopFlag() != null && item.getTopFlag() == 1 ? 0 : 1);
+        itemMapper.updateById(patch);
+        cache.evictTx(item.getId());
+    }
+
+    /**
+     * 相似物品推荐（GET /api/items/{id}/similar）：同分类为前提，叠加时间窗
+     * （±7 天口径由 timeScore 表达）/地点/文本重合度打分，Top-5——补齐开题文档
+     * "详情页含相似物品推荐"缺失的执行口（此前只有发布时的站内信匹配推送）。
+     * 仅对已发布件开放（作者读自己待审件走详情，不走这里）。
+     */
+    public java.util.List<java.util.Map<String, Object>> similar(Long id, int topN) {
+        LostItem src = requireItem(id);
+        if (src.getStatus() != STATUS_PUBLISHED) {
+            return java.util.List.of();
+        }
+        java.util.List<LostItem> candidates = itemMapper.selectList(
+                new LambdaQueryWrapper<LostItem>()
+                        .eq(LostItem::getStatus, STATUS_PUBLISHED)
+                        .eq(LostItem::getCategoryId, src.getCategoryId())
+                        .ne(LostItem::getId, id)
+                        .ge(LostItem::getHappenedAt,
+                          java.time.LocalDateTime.now().minusDays(com.campus.lf.module.notice.service.MatchService.CANDIDATE_WINDOW_DAYS))
+                        .last("limit 500"));
+        java.util.Set<String> tTokens = com.campus.lf.module.notice.service.MatchService.tokenize(src.getTitle());
+        java.util.Set<String> dTokens = com.campus.lf.module.notice.service.MatchService.tokenize(src.getDescription());
+        java.util.List<java.util.Map<String, Object>> out = new java.util.ArrayList<>();
+        for (LostItem c : candidates) {
+            int s = matchService.score(src, c, tTokens, dTokens);
+            if (s >= com.campus.lf.module.notice.service.MatchService.MATCH_THRESHOLD) {
+                Category cat = categoryMapper.selectById(c.getCategoryId());
+                java.util.Map<String, Object> m = new java.util.HashMap<>();
+                m.put("id", c.getId());
+                m.put("type", c.getType());
+                m.put("title", c.getTitle());
+                m.put("happenedAt", c.getHappenedAt());
+                m.put("categoryName", cat == null ? null : cat.getName());
+                m.put("score", s);
+                out.add(m);
+            }
+        }
+        out.sort((a, b) -> Integer.compare((int) b.get("score"), (int) a.get("score")));
+        return out.stream().limit(topN).toList();
+    }
+
+    /**
      * 状态流转（PATCH /api/items/{id}/status?target=）——作者自助下架/重上架；
      * 待审→发布/驳回 走治理动作 changeStatusByAudit（审核队列口，挂 item:audit）。
      */

@@ -163,6 +163,61 @@ class ApiGapM10Test {
     }
 
     @Test
+    @DisplayName("详情页相似推荐口（游客可访问）+ 置顶开关（item:top 治理权限矩阵）")
+    void similarAndTop() throws Exception {
+        String stu = login(STU_A);
+        String mgr = login(MGR);           // MANAGER：种子矩阵含 item:top
+        long a = createItem(stu, "相似源件A");
+        // 过审 A 与候选件，才能进推荐（pageItems/similar 只见发布态）
+        mockMvc.perform(patch("/api/items/" + a + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        long b = createItem(stu, "相似源件A");   // 同标题同分类→Jaccard 高
+        mockMvc.perform(patch("/api/items/" + b + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+
+        // 游客可读相似口（PUBLIC_GETS 登记回归钉：忘登记=401）
+        MvcResult sim = mockMvc.perform(get("/api/items/" + a + "/similar")).andReturn();
+        JsonNode env = envelope(sim);
+        assertThat(env.path("code").asInt()).isEqualTo(0);
+        assertThat(env.path("data").toString()).contains("相似源件A");
+
+        // 置顶：学生无权 1005/403；管理员放行且真翻转 top_flag
+        // 双通道兼容：@PreAuthorize 裸 403 或 service BizException 信封 1005（矩阵测契约不锁实现，M11 口径）
+        MvcResult denied = mockMvc.perform(patch("/api/items/" + a + "/top")
+                .header("Authorization", "Bearer " + stu)).andReturn();
+        assertThat(denied.getResponse().getStatus() == 403
+                || envelope(denied).path("code").asInt() == BizCode.FORBIDDEN.getCode())
+                .as("学生置顶必须被拒").isTrue();
+        mockMvc.perform(patch("/api/items/" + a + "/top").header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        MvcResult det = mockMvc.perform(get("/api/items/" + a)).andReturn();
+        assertThat(envelope(det).path("data").path("topFlag").asInt()).isEqualTo(1);
+        // 再点=取消
+        mockMvc.perform(patch("/api/items/" + a + "/top").header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.code").value(0));
+        MvcResult det2 = mockMvc.perform(get("/api/items/" + a)).andReturn();
+        assertThat(envelope(det2).path("data").path("topFlag").asInt()).isEqualTo(0);
+    }
+
+    @Test
+    @DisplayName("物品图片上限=6：第 7 张后端拒（前端口径已对齐，双保险）")
+    void itemImageCap() throws Exception {
+        String stu = login(STU_A);
+        StringBuilder urls = new StringBuilder();
+        for (int i = 0; i < 7; i++) {
+            urls.append(i > 0 ? "," : "").append("\"/uploads/2026/1/cap").append(i).append(".png\"");
+        }
+        mockMvc.perform(post("/api/items").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"type\":\"LOST\",\"title\":\"图片上限件\",\"description\":\"描述\","
+                                + "\"categoryId\":1,\"happenedAt\":\"2026-11-11T10:00:00\","
+                                + "\"imageUrls\":[" + urls + "]}"))
+                .andExpect(jsonPath("$.code").value(400));
+    }
+
+    @Test
     @DisplayName("回收站：删除进 trash→复活回原状态→再删→彻底删除物理行消失；学生 403")
     void trashFlow() throws Exception {
         String stu = login(STU_A);

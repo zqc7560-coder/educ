@@ -13,7 +13,7 @@
 import { ref, computed, onMounted, watch } from 'vue'
 import { useRoute, useRouter } from 'vue-router'
 import { ElMessage, ElMessageBox } from 'element-plus'
-import { fetchItem, changeItemStatus, deleteItem } from '@/api/item'
+import { fetchItem, changeItemStatus, deleteItem, fetchSimilarItems, toggleItemTop } from '@/api/item'
 import { applyClaim, listClaimsForItem, verifyClaim, rejectClaim, confirmReturn, applyArbitration } from '@/api/claim'
 import { toggleFavorite } from '@/api/common'
 import { useUserStore } from '@/stores/user'
@@ -24,6 +24,8 @@ const router = useRouter()
 const store = useUserStore()
 
 const item = ref(null)
+const similar = ref([])
+const top = () => act(() => toggleItemTop(item.value.id), item.value.topFlag === 1 ? '已取消置顶' : '已置顶')
 const loading = ref(true)
 const claims = ref([])
 const isAuthor = computed(() => item.value && store.user && item.value.userId === store.user.id)
@@ -38,6 +40,7 @@ async function loadAll() {
     if (isAuthor.value || canGovern.value) {
       try { claims.value = await listClaimsForItem(route.params.id) } catch { claims.value = [] }
     }
+    try { similar.value = await fetchSimilarItems(route.params.id) } catch { similar.value = [] }
   } catch {
     item.value = null
   } finally {
@@ -170,6 +173,7 @@ const statusCls = computed(() => {
             <el-button type="danger" plain @click="remove">删除</el-button>
           </template>
           <template v-else>
+            <el-button v-if="canGovern && live" size="small" plain @click="top">{{ item.topFlag === 1 ? '取消置顶' : '置顶' }}</el-button>
             <el-button v-if="item.type === 'FOUND' && live" type="primary" size="large" @click="openClaim">
               这是我丢的东西，申请认领
             </el-button>
@@ -224,6 +228,19 @@ const statusCls = computed(() => {
         </el-table>
       </div>
 
+      <!-- 相似物品推荐（开题文档"详情页相似推荐 Top5"口） -->
+      <div v-if="similar.length" class="similar">
+        <h3>相似物品推荐</h3>
+        <div class="slist">
+          <router-link v-for="s in similar" :key="s.id" :to="`/items/${s.id}`" class="srow">
+            <el-tag size="small" :type="s.type === 'FOUND' ? 'success' : 'danger'" effect="plain">{{ s.type === 'FOUND' ? '招领' : '失物' }}</el-tag>
+            <span class="stitle">{{ s.title }}</span>
+            <span class="scat">{{ s.categoryName || '' }}</span>
+            <span class="sscore">匹配度 {{ s.score }}</span>
+          </router-link>
+        </div>
+      </div>
+
       <el-dialog v-model="claimDialog" title="申请认领" width="460px">
         <el-alert v-if="item && item.verifyQuestion" type="info" :closable="false"
                   :title="`核验问题：${item.verifyQuestion}`" class="mq" />
@@ -266,6 +283,13 @@ const statusCls = computed(() => {
 .reason { margin-bottom: 14px; }
 .actions { margin-top: 18px; display: flex; align-items: center; gap: 10px; }
 .dead-tip { color: #c0c4cc; }
+.similar { margin-top: 20px; background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 16px 22px; }
+.similar h3 { margin: 0 0 10px; font-size: 15px; }
+.slist { display: flex; flex-direction: column; gap: 8px; }
+.srow { display: flex; align-items: center; gap: 10px; text-decoration: none; color: #303133; padding: 6px 8px; border-radius: 6px; }
+.srow:hover { background: #f5f7fa; }
+.stitle { font-weight: 600; flex: 1; }
+.scat, .sscore { color: #909399; font-size: 12px; }
 .claims { margin-top: 20px; background: #fff; border: 1px solid #ebeef5; border-radius: 10px; padding: 18px 22px; }
 .claims h3 { margin: 0 0 12px; font-size: 16px; }
 .evi { color: #909399; font-size: 12px; }

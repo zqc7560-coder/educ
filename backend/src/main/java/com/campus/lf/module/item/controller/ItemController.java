@@ -125,6 +125,21 @@ public class ItemController {
         return Result.ok();
     }
 
+    /** PATCH /api/items/{id}/top：置顶/取消（item:top） */
+    @Operation(summary = "置顶开关（治理）")
+    @PatchMapping("/{id}/top")
+    public Result<Void> toggleTop(@AuthenticationPrincipal LoginUser me, @PathVariable Long id) {
+        itemService.toggleTop(me, id);
+        return Result.ok();
+    }
+
+    /** GET /api/items/{id}/similar：详情页相似推荐 Top5（公开，仅已发布件有结果） */
+    @Operation(summary = "相似物品推荐（同分类+时间窗+地点+文本重合度）")
+    @GetMapping("/{id}/similar")
+    public Result<java.util.List<java.util.Map<String, Object>>> similar(@PathVariable Long id) {
+        return Result.ok(itemService.similar(id, 5));
+    }
+
     /** DELETE /api/items/{id}：逻辑删除（作者或治理口） */
     @Operation(summary = "删除（回收站语义，物理行保留）")
     @DeleteMapping("/{id}")
