@@ -61,6 +61,9 @@ public class ItemVO {
     /** 图片 URL 列表（详情装配；列表页省带宽不装） */
     /** 列表页封面图（sort_order 首图；详情整图集用 images） */
     private String coverUrl;
+    /** 当前登录者是否已收藏（服务端事实源 user_favorite；游客恒 false）——
+     *  详情页刷新后收藏按钮态以此为准，前端本地态只管点击瞬间 */
+    private Boolean favorited;
     /** 图集（详情=整集；列表=整集供卡片轮播，按 sort_order） */
     private List<String> images;
 

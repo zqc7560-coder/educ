@@ -72,8 +72,17 @@ public class ItemController {
     /** GET /api/items/{id}：详情（浏览计数；contact 仅登录可见；非发布态按矩阵裁决） */
     @Operation(summary = "物品详情")
     @GetMapping("/{id}")
-    public Result<ItemVO> detail(@PathVariable Long id, @AuthenticationPrincipal LoginUser me) {
-        return Result.ok(itemService.detail(id, me));
+    public Result<ItemVO> detail(@PathVariable Long id, @AuthenticationPrincipal LoginUser me,
+                                 jakarta.servlet.http.HttpServletRequest request) {
+        // 浏览去重身份：登录者按 uid；游客按真实来源 IP（nginx 已注入 X-Real-IP）
+        String viewerKey;
+        if (me != null) {
+            viewerKey = "u:" + me.getUserId();
+        } else {
+            String rip = request.getHeader("X-Real-IP");
+            viewerKey = "ip:" + (rip == null || rip.isBlank() ? request.getRemoteAddr() : rip);
+        }
+        return Result.ok(itemService.detail(id, me, viewerKey));
     }
 
     /**

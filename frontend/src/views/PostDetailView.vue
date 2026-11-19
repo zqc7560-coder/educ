@@ -35,6 +35,7 @@ async function loadAll() {
   loading.value = true
   try {
     post.value = await fetchPost(route.params.id)
+    fav.value = post.value?.favorited === true   // 收藏态服务端回读（刷新不复位）
     tree.value = await fetchReplyTree(route.params.id).catch(() => [])
   } catch { post.value = null } finally { loading.value = false }
 }
@@ -50,10 +51,12 @@ async function doLike() {
     post.value.likeCount += post.value.liked ? 1 : -1
   } catch { /* toast */ }
 }
+const fav = ref(false)
 async function doFav() {
   if (!store.isLoggedIn) return goLogin()
   try {
     const r = await toggleFavorite('POST', post.value.id)
+    fav.value = r.favorited
     ElMessage.success(r.favorited ? '已收藏' : '已取消收藏')
   } catch { /* toast */ }
 }
@@ -143,7 +146,7 @@ const at = (r) => r.replyToNickname ? `@${r.replyToNickname} ：` : ''
             <el-button v-if="isPublished" size="small" :type="post.liked ? 'primary' : 'default'" @click="doLike">
               {{ post.liked ? '👍 已赞' : '👍 点赞' }} {{ post.likeCount }}
             </el-button>
-            <el-button v-if="isPublished" size="small" @click="doFav">☆ 收藏</el-button>
+            <el-button v-if="isPublished" size="small" @click="doFav">{{ fav ? '★ 已收藏' : '☆ 收藏' }}</el-button>
             <el-button v-if="isPublished" size="small" link type="warning" @click="report">举报</el-button>
           </div>
         </div>

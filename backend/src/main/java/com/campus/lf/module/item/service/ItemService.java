@@ -91,6 +91,8 @@ public class ItemService {
     // M9 缓存：读侧 Cache-Aside、写侧事务双删；Redis 任何故障都在服务内部
     // try-catch 降级，业务方法签名与正确性口径零变化
     private final ItemCacheService cache;
+    private final com.campus.lf.module.forum.mapper.UserFavoriteMapper favoriteMapper;
+    private final ViewOnceGate viewOnceGate;
 
     // ==================================================================
     // 检索
@@ -171,7 +173,7 @@ public class ItemService {
     }
 
     /** 详情（GET /api/items/{id}）：可见性矩阵 + 浏览计数 + 登录态字段脱敏分级 */
-    public ItemVO detail(Long id, LoginUser me) {
+    public ItemVO detail(Long id, LoginUser me, String viewerKey) {
         // M9 读路径。缓存安全前提=「任何人读到的完全一致」，本系统只有游客视图满足
         // （contact 登录才填充）——所以缓存只罩 me=null 分支：游客吃缓存（全站最大读
         // 流量），登录者直查 DB 走完整可见性矩阵。回填同理只在游客读路径做，
@@ -179,15 +181,20 @@ public class ItemService {
         if (me == null) {
             ItemVO cached = cache.getDetail(id);
             if (cached != null) {
-                cache.countPv(id);
+                if (viewOnceGate.shouldCount("item", id, viewerKey)) {
+                    cache.countPv(id);
+                }
                 return cached;
             }
         }
         LostItem item = requireItem(id);
         assertReadable(item, me);
         // PV 计数在可见性闸之后：404/403 路径不计数——"看不见的东西被浏览"
-        // 会污染趋势数据（博客 M9 同口径）
-        cache.countPv(id);
+        // 会污染趋势数据（博客 M9 同口径）。按访客去重（用户要求）：登录者 u:{id}、
+        // 游客 ip:{X-Real-IP}，24h 窗口内同人多刷只 +1
+        if (viewOnceGate.shouldCount("item", id, viewerKey)) {
+            cache.countPv(id);
+        }
         ItemVO vo = assemble(item, me, true);
         if (me == null && item.getStatus() == STATUS_PUBLISHED) {
             cache.putDetail(id, vo);   // vo 此刻即游客视图（me=null 装配），无个人字段
@@ -651,7 +658,14 @@ public class ItemService {
                 .stream().map(ItemImage::getUrl).toList()
                 : List.of();
 
+        boolean favorited = me != null && withImages && favoriteMapper.selectCount(
+                new LambdaQueryWrapper<com.campus.lf.module.forum.entity.UserFavorite>()
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getUserId, me.getUserId())
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getTargetType, "ITEM")
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getTargetId, item.getId())) > 0;
+
         return ItemVO.builder()
+                .favorited(favorited)
                 .id(item.getId())
                 .type(item.getType())
                 .title(item.getTitle())

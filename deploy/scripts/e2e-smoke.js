@@ -1,10 +1,12 @@
 /**
  * 校园失物招领系统 · 全功能端到端冒烟（真接口+真浏览器混合）
  * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
- * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏→
- *       举报工单→两段式上传→编辑重审→治理口→看板→消息→游客视角→
- *       卡片封面轮播(多图轮/单图静/contain)→未审核内容互动闸（收藏/点赞/
- *       回复+归一路径 replyToId 闸，管理员同闸）
+ * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏(含
+ *       服务端态回读)→举报工单→两段式上传→编辑重审→治理口→看板→消息→
+ *       游客视角+登录页游客入口→卡片封面轮播→浏览按访客去重→
+ *       未审核内容互动闸（收藏/点赞/回复+归一 replyToId 闸，管理员同闸）
+ * 纪律：同号重登会按"登录水位"踢掉在先令牌——复用 token 的段落禁止中途重登，
+ *       需要新身份就注册新号；回复防刷 10s 窗同理，一段一号只发一贴。
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -114,6 +116,49 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     ok('重复归还被拒(3002/3004/2004)', r.code === 3002 || r.code === 3004 || r.code === 2004, `got ${r.code}`);
   }
 
+  // ---------- 6b. 收藏态服务端回读（刷新后按钮仍"已收藏"） ----------
+  {
+    const p101 = (await api('/items/101', { tok: stuTok })).data;
+    ok('物品详情带服务端 favorited 态', typeof p101?.favorited === 'boolean', JSON.stringify(p101?.favorited));
+    const f0 = await api('/favorites/toggle', { tok: stuTok, body: { targetType: 'ITEM', targetId: 101 } });
+    const rb1 = await api('/items/101', { tok: stuTok });
+    ok('★收藏后回读详情 favorited=true(刷新不复位)', f0.code === 0 && rb1.data?.favorited === true, JSON.stringify({ t: f0.data, rb: rb1.data?.favorited }));
+    await api('/favorites/toggle', { tok: stuTok, body: { targetType: 'ITEM', targetId: 101 } });
+    const rb2 = await api('/items/101', { tok: stuTok });
+    ok('取消后回读 false', rb2.data?.favorited === false, JSON.stringify(rb2.data?.favorited));
+
+    const pubNo = 'c' + STAMP.slice(-8);
+    await register(pubNo, '收藏回读号' + STAMP);
+    const pubTok = (await api('/auth/login', { body: { studentNo: pubNo, password: PWD } })).data?.token;
+    const np = await api('/forum/posts', { tok: stuTok, body: { boardId: 11, title: '收藏回读帖' + STAMP, content: '服务端收藏态回读验证正文' } });
+    const npid = np.data?.id;
+    await api(`/forum/posts/${npid}/status?target=1`, { tok: adminTok, method: 'PATCH' });
+    await api('/favorites/toggle', { tok: pubTok, body: { targetType: 'POST', targetId: npid } });
+    const pr = await api(`/forum/posts/${npid}`, { tok: pubTok });
+    ok('★帖子详情服务端 favorited=true(收藏人非作者)', pr.data?.favorited === true, JSON.stringify(pr.data?.favorited));
+    await api('/favorites/toggle', { tok: pubTok, body: { targetType: 'POST', targetId: npid } });
+    const pr2 = await api(`/forum/posts/${npid}`, { tok: pubTok });
+    ok('帖取消后回读 false', pr2.data?.favorited === false, JSON.stringify(pr2.data?.favorited));
+  }
+
+  // ---------- 6c. 浏览量按访客去重（帖子=读路径即时 +1 可 HTTP 断言；物品同款逻辑 JUnit 钉） ----------
+  {
+    const vNo1 = 'd' + STAMP.slice(-8);
+    const vNo2 = 'e' + STAMP.slice(-8);
+    await register(vNo1, '浏览去重甲' + STAMP);
+    await register(vNo2, '浏览去重乙' + STAMP);
+    const vTok1 = (await api('/auth/login', { body: { studentNo: vNo1, password: PWD } })).data?.token;
+    const vTok2 = (await api('/auth/login', { body: { studentNo: vNo2, password: PWD } })).data?.token;
+    const c0 = (await api('/forum/posts/201', { tok: vTok2 })).data?.viewCount ?? 0;   // 乙首读：+1 即时
+    const c1 = (await api('/forum/posts/201', { tok: vTok2 })).data?.viewCount ?? 0;   // 乙复读：去重不加
+    const c2 = (await api('/forum/posts/201', { tok: vTok1 })).data?.viewCount ?? 0;   // 甲首读：+1
+    const c3 = (await api('/forum/posts/201', { tok: vTok2 })).data?.viewCount ?? 0;   // 乙三读：仍不加
+    ok('★帖浏览同人复刷不重复计数(甲乙各只+1)', c1 === c0 && c2 === c1 + 1 && c3 === c2, `c0=${c0} c1=${c1} c2=${c2} c3=${c3}`);
+    // 物品侧行为一致性：详情响应带 viewCount 字段（批刷滞后属 M9 展示口径），去重逻辑 JUnit ItemApiM3Test 钉死
+    const itv = await api('/items/101', { tok: vTok1 });
+    ok('物品详情可读且带 viewCount', typeof itv.data?.viewCount === 'number', JSON.stringify(itv.data?.viewCount));
+  }
+
   // ---------- 7. 论坛：发帖→未发布闸（收藏/点赞/回复全拒）→审核通过→可互动 ----------
   const boards = await api('/categories?kind=BOARD');
   const boardId = boards.data?.[0]?.id || 11;
@@ -150,8 +195,8 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     }
     r = await api(`/forum/posts/${postId}/replies`, { tok: stuTok, body: { content: '回复二级：谢谢支持', parentId: rootReply } });
     ok('两级回复(楼中楼·放行后)', r.code === 0, `got ${r.code} ${r.msg}`);
-    const lateTok = (await api('/auth/login', { body: { studentNo: claimerNo, password: PWD } })).data?.token;
-    const r3 = await api(`/forum/posts/${postId}/replies`, { tok: lateTok, body: { content: '三级违规', parentId: r.data?.id } });
+    // 不再重登 claimerNo 取 lateTok：同号登录会踢掉在先的 cTok（水位语义）——直接复用
+    const r3 = await api(`/forum/posts/${postId}/replies`, { tok: cTok, body: { content: '三级违规', parentId: r.data?.id } });
     ok('三级回复被拒(5006；若先撞防刷 5007 也算闸门生效)', r3.code === 5006 || r3.code === 400 || r3.code === 5007, `got ${r3.code}`);
   }
   // 帖子不存在收藏 404
@@ -390,6 +435,11 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
 
     // 归一路径闸（用户实测"在待审评论下回复"真实打法）：一级放行→二级挂其下(待审)→
     // 对二级点回复：parentId=一级(已发布)+replyToId=二级(待审) → 必须 5008
+    // 论坛先审后发是系统参数（用户可在后台关闭）——归一闸测依赖"回复会进待审态"，
+    // 显式置 1、测完恢复原值；顺带覆盖 PUT /admin/configs 口
+    const cfgsBefore = await api('/admin/configs', { tok: adminTok });
+    const forumAuditOld = (cfgsBefore.data || []).find(c => c.configKey === 'forum_audit')?.configValue;
+    await api('/admin/configs/forum_audit', { tok: adminTok, method: 'PUT', body: { value: '1' } });
     let seq5 = 0; const freshGateTok = async () => {
       const no = 'b' + STAMP.slice(-7) + (++seq5);
       await register(no, '归一闸号' + no);
@@ -399,6 +449,7 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const l1 = await api(`/forum/posts/${gPid}/replies`, { tok: tokL1, body: { content: '归一闸一级楼' } });
     const l1id = l1.data?.id;
     if (l1id) {
+      // l1 此时必为待审(刚置 1)；放行它好挂二级
       const hnd = await api(`/admin/replies/${l1id}/handle`, { tok: adminTok, body: { target: 1 } });
       ok('归一闸:一级楼放行', hnd.code === 0, 'got ' + hnd.code);
       const tok4 = await freshGateTok();
@@ -409,6 +460,7 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
       const bypass = await api(`/forum/posts/${gPid}/replies`, { tok: tokB, body: { content: '绕归一抢跑', parentId: l1id, replyToId: l2id } });
       ok('★对『待审楼』回复(归一 parentId 绕闸)被拒(5008)——实测 bug 回归钉', bypass.code === 5008, 'got ' + bypass.code);
     }
+    if (forumAuditOld != null) await api('/admin/configs/forum_audit', { tok: adminTok, method: 'PUT', body: { value: forumAuditOld } });
   }
 
   // ---------- 14. 游客视角（全新无登录上下文）：大厅可逛/详情可读/相似推荐可见/引导条在 ----------

@@ -223,15 +223,17 @@ class CacheApiM9Test {
         String stu = login(STU_A);
         long id = createPublished(stu, login(STU_B), "PV样本");
 
-        mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读1（回源）
-        mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读2（命中缓存仍计数）
-        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu)).andReturn(); // 登录读
-        assertThat(cache.peekCounter(ItemCacheService.PV_PREFIX + id)).isEqualTo(3);
+        // 浏览去重（用户要求：同一访客多次点击只 +1）：同 IP 游客两读只计 1；
+        // 登录者是另一访客身份（u:uid）另计 1 —— 共 2
+        mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读1（回源，计数）
+        mockMvc.perform(get("/api/items/" + id)).andReturn();          // 游客读2（同 ip，去重不计数）
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu)).andReturn(); // 登录读（u:1 计数）
+        assertThat(cache.peekCounter(ItemCacheService.PV_PREFIX + id)).isEqualTo(2);
 
         int dbBefore = itemMapper.selectById(id).getViewCount();
         PvSyncJob.Result res = pvSyncJob.syncNow();
         assertThat(res.applied()).isGreaterThanOrEqualTo(1);
-        assertThat(itemMapper.selectById(id).getViewCount()).isEqualTo(dbBefore + 3);
+        assertThat(itemMapper.selectById(id).getViewCount()).isEqualTo(dbBefore + 2);
         assertThat(cache.peekCounter(ItemCacheService.PV_PREFIX + id)).isZero();
         // 再跑一轮：无增量可回写（取走即归零的幂等证明）
         assertThat(pvSyncJob.syncNow().totalDelta()).isZero();

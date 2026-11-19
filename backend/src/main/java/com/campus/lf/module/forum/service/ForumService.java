@@ -88,6 +88,8 @@ public class ForumService {
     private final ForumPostMapper postMapper;
     private final ForumReplyMapper replyMapper;
     private final ForumLikeMapper likeMapper;
+    private final com.campus.lf.module.forum.mapper.UserFavoriteMapper favoriteMapper;
+    private final com.campus.lf.module.item.service.ViewOnceGate viewOnceGate;
     private final com.campus.lf.module.forum.mapper.PostReportMapper reportMapper;
     private final PostImageMapper postImageMapper;
     private final SysUserMapper userMapper;
@@ -149,15 +151,21 @@ public class ForumService {
                 assemble(page.getRecords(), me));
     }
 
-    /** 详情：待审/下架的可见性矩阵；浏览计数排除作者自览 */
-    public PostVO detail(LoginUser me, Long id) {
+    /** 详情：待审/下架的可见性矩阵；浏览计数排除作者自览 + 按访客 24h 去重 */
+    public PostVO detail(LoginUser me, Long id, String viewerKey) {
         ForumPost post = requireVisible(me, id);
-        if (me == null || !post.getUserId().equals(me.getUserId())) {
+        if ((me == null || !post.getUserId().equals(me.getUserId()))
+                && viewOnceGate.shouldCount("post", id, viewerKey)) {
             postMapper.update(null, new LambdaUpdateWrapper<ForumPost>()
                     .eq(ForumPost::getId, id).setSql("view_count = view_count + 1"));
             post.setViewCount(post.getViewCount() + 1);
         }
         PostVO vo = assemble(List.of(post), me).get(0);
+        vo.setFavorited(me != null && favoriteMapper.selectCount(
+                new LambdaQueryWrapper<com.campus.lf.module.forum.entity.UserFavorite>()
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getUserId, me.getUserId())
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getTargetType, "POST")
+                        .eq(com.campus.lf.module.forum.entity.UserFavorite::getTargetId, id)) > 0);
         vo.setContent(post.getContent());   // 列表=摘要、详情=全文（assemble 统一做摘要化）
         vo.setImages(postImageMapper.selectList(new LambdaQueryWrapper<PostImage>()
                         .eq(PostImage::getPostId, id).orderByAsc(PostImage::getSortOrder))

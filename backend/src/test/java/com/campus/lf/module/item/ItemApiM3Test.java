@@ -547,13 +547,15 @@ class ItemApiM3Test {
         long id = createItem(stu, "LOST", "计数样本", null);
         publishViaAudit(login(STU_B), id);
 
-        MvcResult r1 = mockMvc.perform(get("/api/items/" + id)).andReturn();
-        mockMvc.perform(get("/api/items/" + id)).andReturn();
+        MvcResult r1 = mockMvc.perform(get("/api/items/" + id)
+                .header("X-Real-IP", "10.1.1.1")).andReturn();
+        mockMvc.perform(get("/api/items/" + id).header("X-Real-IP", "10.1.1.1")).andReturn();  // 同访客复访
+        mockMvc.perform(get("/api/items/" + id).header("X-Real-IP", "10.9.9.9")).andReturn();  // 另一访客
         // 展示语义变更（M9 决策，答辩口径）：详情 viewCount 来自缓存快照/DB 旧值，
         // 允许滞后 ≤5min——浏览量是统计语义不是账本，换读路径零 UPDATE 主表
         assertThat(envelope(r1).path("data").path("viewCount").asInt()).isEqualTo(0);
 
-        // 事实口径：两读 = Redis 计数 2；回写作业落库后 DB=2
+        // 浏览去重（用户要求）：同 IP 两刷只 +1，第二 IP 再 +1 → 计数 2；落库 DB=2
         assertThat(itemCache.peekCounter("lf:pv:" + id)).isEqualTo(2);
         pvSyncJob.syncNow();
         assertThat(itemMapper.selectById(id).getViewCount()).isEqualTo(2);

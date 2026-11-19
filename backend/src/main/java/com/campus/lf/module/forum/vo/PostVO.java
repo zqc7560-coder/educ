@@ -32,6 +32,8 @@ public class PostVO {
     private Integer topFlag;
     /** 当前登录者是否已赞（游客恒 false） */
     private Boolean liked;
+    /** 当前登录者是否已收藏（服务端事实源；详情页刷新后按钮态的回读依据） */
+    private Boolean favorited;
     private LocalDateTime publishedAt;
     private LocalDateTime createdAt;
     private Integer version;

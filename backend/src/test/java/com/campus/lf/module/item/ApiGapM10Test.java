@@ -321,6 +321,53 @@ class ApiGapM10Test {
     }
 
     @Test
+    @DisplayName("详情收藏态服务端回读：收藏→favorited=true，取消→false（刷新复位 bug 钉）")
+    void detailFavoritedReadBack() throws Exception {
+        String stu = login(STU_A);
+        String mgr = login(MGR);
+        long id = createItem(stu, "收藏回读件");
+        mockMvc.perform(patch("/api/items/" + id + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
+        // 初始：未收藏
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+        // 收藏后回读 true
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + id + "}"))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+        // 他人视角各自独立
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+        // 取消收藏回读 false
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"ITEM\",\"targetId\":" + id + "}"));
+        mockMvc.perform(get("/api/items/" + id).header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+
+        // 帖子同款：作者发布→MGR 收藏→MGR 读详情 true / 作者读 false
+        MvcResult post = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"boardId\":\"11\",\"title\":\"帖收藏回读\",\"content\":\"帖子收藏态回读验证正文\"}"))
+                .andReturn();
+        long pid = Long.parseLong(envelope(post).path("data").path("id").asText());
+        mockMvc.perform(patch("/api/forum/posts/" + pid + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(post("/api/favorites/toggle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"targetType\":\"POST\",\"targetId\":" + pid + "}"))
+                .andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/api/forum/posts/" + pid).header("Authorization", "Bearer " + mgr))
+                .andExpect(jsonPath("$.data.favorited").value(true));
+        mockMvc.perform(get("/api/forum/posts/" + pid).header("Authorization", "Bearer " + stu))
+                .andExpect(jsonPath("$.data.favorited").value(false));
+    }
+
+    @Test
     @DisplayName("列表封面 coverUrl：首图口径、无图为 null、全状态列表各见其图")
     void listCoverUrl() throws Exception {
         String stu = login(STU_A);

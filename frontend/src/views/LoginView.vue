@@ -146,11 +146,18 @@ async function submitRegister() {
           </el-form>
         </el-tab-pane>
       </el-tabs>
+      <!-- 游客入口：不必登录即可进大厅（发布/认领等操作会再引导登录） -->
+      <div class="guest-entry">
+        <el-link type="primary" :underline="false" @click="$router.push('/')">
+          先随便逛逛（以游客身份浏览失物大厅）→
+        </el-link>
+      </div>
     </el-card>
   </main>
 </template>
 
 <style scoped>
+.guest-entry { margin-top: 14px; text-align: center; }
 .login-page {
   display: flex;
   justify-content: center;

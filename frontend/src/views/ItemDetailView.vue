@@ -37,6 +37,8 @@ async function loadAll() {
   loading.value = true
   try {
     item.value = await fetchItem(route.params.id)
+    // 收藏态以服务端回读为准（修复：点收藏后刷新按钮复位——旧版 fav 是纯本地态）
+    fav.value = item.value?.favorited === true
     if (isAuthor.value || canGovern.value) {
       try { claims.value = await listClaimsForItem(route.params.id) } catch { claims.value = [] }
     }
