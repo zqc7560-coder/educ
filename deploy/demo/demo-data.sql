@@ -16,7 +16,7 @@ DELETE FROM user_favorite    WHERE id BETWEEN 201 AND 209;
 DELETE FROM forum_like       WHERE id BETWEEN 201 AND 221;
 DELETE FROM forum_reply      WHERE id BETWEEN 201 AND 218;
 DELETE FROM forum_post       WHERE id BETWEEN 201 AND 212;
-DELETE FROM lost_item        WHERE id BETWEEN 201 AND 222;
+DELETE FROM lost_item        WHERE id BETWEEN 201 AND 224;
 DELETE FROM notification     WHERE id BETWEEN 201 AND 212;
 DELETE FROM item_image       WHERE id BETWEEN 201 AND 233;
 DELETE FROM sys_user_role    WHERE user_id IN (SELECT id FROM sys_user WHERE student_no IN ('2023508094','2023508095','2023508096'));
@@ -81,7 +81,14 @@ INSERT INTO lost_item (id, type, title, description, category_id, campus_id, bui
   (221, 'FOUND', '学生卡套（动漫图案）', '图书馆服务台发现的卡套，里面卡已交失物中心，卡套先挂这里失主自取。', 1, 1, 13, '一层服务台',
    NOW(), '三号楼一层失物中心', '卡套上印的是什么角色？', @ua, 1, NULL, 4, 0, 0, 0, 0, NOW()),
   (222, 'LOST', '运动水壶（黑色大容量）', '在体育馆跑步机上落下的大水壶，壶身有"HEAVY USER"贴纸。', 5, 2, 14, '二楼跑步机区',
-   NOW(), 'tel_138****0011', NULL, 1, 1, NULL, 30, 0, 0, 0, 0, NOW());
+   NOW(), 'tel_138****0011', NULL, 1, 1, NULL, 30, 0, 0, 0, 0, NOW()),
+  -- 回收站演示两件（deleted=1 软删：大厅/搜索/详情全不可见，仅管理台"回收站"可复活/彻底删除）
+  (223, 'FOUND', '灰色毛线帽（舞台区座椅）', '元旦晚会舞台区座椅上落下一顶灰色毛线帽——信息重复提交，管理员移入回收站待处理。', 4, 1, 15, '大礼堂',
+   DATE_SUB(NOW(), INTERVAL 8 DAY), 'wx_zhang_ts', '帽子里衬写了什么字？', @ua, 1, NULL, 12, 0, 0, 0, 0, DATE_SUB(NOW(), INTERVAL 8 DAY)),
+  (224, 'LOST', '蓝色笔袋（内含U盘）', '期末周丢的笔袋，里面有存了毕设的U盘——发布者自己删除申请找回，保留在回收站等待复活。', 3, 2, NULL, '南校区自习室',
+   DATE_SUB(NOW(), INTERVAL 5 DAY), 'qq_xiaoming', NULL, @ub, 0, NULL, 2, 0, 0, 0, 0, NULL);
+-- 软删位（lost_item @TableLogic：业务口一律查不到；回收站口走原生 SQL 才可见）
+UPDATE lost_item SET deleted = 1 WHERE id IN (223, 224);
 
 
 -- ---------- 2b) 演示图片（bind 挂载直出 /uploads/demoimg/*，down -v 不丢） ----------
@@ -111,9 +118,13 @@ INSERT INTO item_image (id, item_id, url, sort_order) VALUES
   (221, 221, '/uploads/demoimg/lanyard.png', 0),    -- 动漫卡套
   (222, 222, '/uploads/demoimg/bottle.png', 0),     -- 运动水壶
   (223, 201, '/uploads/demoimg/lanyard.png', 1),    -- 一卡通第二图(详情图集验证；封面仍取首图)
+  (224, 203, '/uploads/demoimg/powerbank.png', 1),  -- 耳机一只：卡片轮播画例(第2帧·换图便于演示切帧)
+  (225, 203, '/uploads/demoimg/watchbox.png', 2),   -- 耳机一只：卡片轮播画例(第3帧)
   (231, 101, '/uploads/demoimg/card.png', 0),       -- data.sql 种子三件也补封面
   (232, 102, '/uploads/demoimg/earbud.png', 0),
-  (233, 103, '/uploads/demoimg/keys.png', 0);
+  (233, 103, '/uploads/demoimg/keys.png', 0),
+  (226, 223, '/uploads/demoimg/gloves.png', 0),     -- 回收站件一配图
+  (227, 224, '/uploads/demoimg/lamp.png', 0);       -- 回收站件二配图
 
 -- ---------- 3) 认领单 7 张（6 态）+ 留痕 ----------
 INSERT INTO item_claim (id, item_id, claimant_id, answer, evidence_note, status, reject_reason, arbitrated_by, handled_at, version, created_at) VALUES

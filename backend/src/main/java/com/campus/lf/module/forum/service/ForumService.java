@@ -335,6 +335,22 @@ public class ForumService {
 
         Long parentId = dto.getParentId();
         Long replyToUid = dto.getReplyToUserId();
+        // 归一目标楼层闸：UI"回复某楼"会把 parentId 归一到其一级父，真实目标经 replyToId 传达——
+        // 目标楼未过审一律拒绝（否则待审楼下能盖出已发布回复=用户实测漏洞）；目标存在时 @ 对象以它为准
+        Long replyToId = dto.getReplyToId();
+        if (replyToId != null) {
+            ForumReply target = replyMapper.selectById(replyToId);
+            if (target == null || !target.getPostId().equals(postId)) {
+                throw new BizException(BizCode.PARAM_ERROR, "被回复的楼层不存在或不在本帖");
+            }
+            if (target.getStatus() == null || target.getStatus() != STATUS_PUBLISHED) {
+                throw new BizException(BizCode.POST_STATUS_INVALID, "该回复尚未通过审核，暂不可回复");
+            }
+            replyToUid = target.getUserId();
+            if (parentId == null) {
+                parentId = target.getParentId() != null ? target.getParentId() : target.getId();
+            }
+        }
         if (parentId != null) {
             ForumReply parent = replyMapper.selectById(parentId);
             if (parent == null || !parent.getPostId().equals(postId)) {

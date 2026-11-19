@@ -43,6 +43,12 @@ async function purge(row) {
 <template>
   <div v-loading="loading">
     <h2>回收站</h2>
+    <el-alert type="info" :closable="false" class="intro">
+      <template #title>回收站收纳<b>已被删除（软删）的失物招领信息</b>——用户删除或治理删除的物品会进到这里，
+      不会消失在大厅/详情之外的任何公开位置。在这里你可以：①<b>搜索找回误删件</b>（按标题）；
+      ②<b>复活</b>——恢复到删除前的原始状态（待审/已发布/下架都原样还原，不会自动过审）；
+      ③<b>彻底删除</b>——物理删行、不可恢复，用于清理确认无价值的旧数据。误删申诉、数据纠纷都靠这个页面处理。</template>
+    </el-alert>
     <div class="bar">
       <el-input v-model="keyword" placeholder="搜标题" clearable style="width:220px"
                 @keyup.enter="() => { pageNum = 1; load() }" @clear="() => { pageNum = 1; load() }" />
@@ -72,6 +78,7 @@ async function purge(row) {
 </template>
 
 <style scoped>
+.intro { margin-bottom: 12px; }
 h2 { margin: 0 0 14px; font-size: 19px; }
 .bar { display: flex; gap: 8px; margin-bottom: 12px; }
 .pager { margin-top: 14px; justify-content: center; }

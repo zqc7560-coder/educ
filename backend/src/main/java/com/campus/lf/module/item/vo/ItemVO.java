@@ -61,6 +61,7 @@ public class ItemVO {
     /** 图片 URL 列表（详情装配；列表页省带宽不装） */
     /** 列表页封面图（sort_order 首图；详情整图集用 images） */
     private String coverUrl;
+    /** 图集（详情=整集；列表=整集供卡片轮播，按 sort_order） */
     private List<String> images;
 
     private Integer viewCount;

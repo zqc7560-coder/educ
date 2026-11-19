@@ -438,10 +438,19 @@ public class ItemService {
         Map<Long, String> nicknames = userIds.isEmpty() ? Map.of()
                 : userMapper.selectBatchIds(userIds).stream()
                     .collect(Collectors.toMap(SysUser::getId, SysUser::getNickname));
+        Map<Long, String> tCovers = new HashMap<>();
+        if (!rows.isEmpty()) {
+            for (ItemImage img : imageMapper.selectList(new LambdaQueryWrapper<ItemImage>()
+                    .in(ItemImage::getItemId, rows.stream().map(LostItem::getId).toList())
+                    .orderByAsc(ItemImage::getSortOrder))) {
+                tCovers.putIfAbsent(img.getItemId(), img.getUrl());
+            }
+        }
         List<ItemVO> list = rows.stream().map(r -> ItemVO.builder()
                 .id(r.getId()).type(r.getType()).title(r.getTitle())
                 .categoryId(r.getCategoryId()).userId(r.getUserId())
                 .userNickname(nicknames.get(r.getUserId()))
+                .coverUrl(tCovers.get(r.getId()))
                 .status(r.getStatus()).viewCount(r.getViewCount())
                 .createdAt(r.getCreatedAt()).build()).toList();
         return new PageResult<>(page.getTotal(), page.getPages(), page.getCurrent(),
@@ -687,12 +696,13 @@ public class ItemService {
                     .collect(Collectors.toMap(Category::getId, Category::getName));
         Map<Long, String> nicknames = userMapper.selectBatchIds(userIds).stream()
                 .collect(Collectors.toMap(SysUser::getId, SysUser::getNickname));
-        // 封面图：整页一次 IN 批查，取各件 sort_order 首图（卡片按图找物；防 N+1）
-        Map<Long, String> covers = new HashMap<>();
+        // 封面图集：整页一次 IN 批查按 sort_order 收集每件全部图（卡片轮播；防 N+1）。
+        // 卡片只展示图不泄露更多字段——url 本就是公开静态资源路径
+        Map<Long, List<String>> covers = new HashMap<>();
         for (ItemImage img : imageMapper.selectList(new LambdaQueryWrapper<ItemImage>()
                 .in(ItemImage::getItemId, rows.stream().map(LostItem::getId).toList())
                 .orderByAsc(ItemImage::getSortOrder))) {
-            covers.putIfAbsent(img.getItemId(), img.getUrl());
+            covers.computeIfAbsent(img.getItemId(), k -> new java.util.ArrayList<>()).add(img.getUrl());
         }
 
         List<ItemVO> list = rows.stream().map(r -> ItemVO.builder()
@@ -710,8 +720,8 @@ public class ItemService {
                 .claimCount(r.getClaimCount())
                 .topFlag(r.getTopFlag())
                 .publishedAt(r.getPublishedAt())
-                .coverUrl(covers.get(r.getId()))
-                .images(List.of())
+                .coverUrl(covers.getOrDefault(r.getId(), List.of()).stream().findFirst().orElse(null))
+                .images(covers.getOrDefault(r.getId(), List.of()))
                 .build()).toList();
         return new PageResult<>(page.getTotal(), page.getPages(),
                 page.getCurrent(), page.getSize(), list);

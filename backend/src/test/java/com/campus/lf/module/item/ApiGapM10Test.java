@@ -41,6 +41,7 @@ class ApiGapM10Test {
     @Autowired private MockMvc mockMvc;
     @Autowired private ObjectMapper om;
     @Autowired private JdbcTemplate jdbcTemplate;
+    @Autowired private com.campus.lf.module.forum.service.ForumService forumService;
 
     private static final String SEED_PWD = "password123";
     private static final String STU_A = "2023508090";
@@ -58,6 +59,11 @@ class ApiGapM10Test {
     private JsonNode envelope(MvcResult r) throws Exception {
         return om.readTree(new String(r.getResponse().getContentAsByteArray(),
                 java.nio.charset.StandardCharsets.UTF_8));
+    }
+
+    private long loginUid(String token) throws Exception {
+        MvcResult me = mockMvc.perform(get("/api/auth/me").header("Authorization", "Bearer " + token)).andReturn();
+        return envelope(me).path("data").path("id").asLong();
     }
 
     private String login(String no) throws Exception {
@@ -257,6 +263,64 @@ class ApiGapM10Test {
     }
 
     @Test
+    @DisplayName("归一回复闸：对『待审二级楼』点回复(parentId 归一到已发布一级)→ 5008（用户实测路径钉）")
+    void normalizedReplyToPendingFloorBlocked() throws Exception {
+        String stu = login(STU_A);
+        String mgr = login(MGR);
+        MvcResult post = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"boardId\":\"11\",\"title\":\"归一闸帖\",\"content\":\"归一回复漏洞验证正文\"}"))
+                .andReturn();
+        long pid = Long.parseLong(envelope(post).path("data").path("id").asText());
+        mockMvc.perform(patch("/api/forum/posts/" + pid + "/status").param("target", "1")
+                        .header("Authorization", "Bearer " + mgr)).andExpect(jsonPath("$.code").value(0));
+
+        // 一级楼（管理员发，直接过审场景不可假设——发完由 MGR 放行）
+        MvcResult r1 = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"content\":\"一级楼\"}"))
+                .andReturn();
+        long root1 = Long.parseLong(envelope(r1).path("data").path("id").asText());
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/admin/replies/" + root1 + "/handle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"target\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
+
+        // 二级待审楼：学生挂在已发布一级下（不审核，status=0）
+        MvcResult r2 = mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + stu)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"二级待审楼\",\"parentId\":" + root1 + "}"))
+                .andReturn();
+        assertThat(envelope(r2).path("code").asInt()).isEqualTo(0);
+        long pend2 = Long.parseLong(envelope(r2).path("data").path("id").asText());
+
+        // 用户实测路径：管理员对这条"待审二级楼"点回复 → 前端归一 parentId=root1(已发布)
+        // + replyToId=pend2(待审)。旧版只查 parentId → 放行=漏洞；新版 replyToId 闸必须 5008
+        forumService.seedLastReplyAt(loginUid(mgr), 0L);   // mgr 发 root1 刚占防刷窗
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"绕归一抢跑\",\"parentId\":" + root1 + ",\"replyToId\":" + pend2 + "}"))
+                .andExpect(jsonPath("$.code").value(BizCode.POST_STATUS_INVALID.getCode()));
+
+        // 放行 pend2 后同参数回复 → 成功（闸只拦未过审目标）
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/admin/replies/" + pend2 + "/handle").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON).content("{\"target\":1}"))
+                .andExpect(jsonPath("$.code").value(0));
+        // stu 刚被 5008 占防刷窗（5008 也记录时间戳）→ 用 MGR 发，注意 mgr 上一发也占窗；
+        // 5008 尝试同样记录防刷时间戳——解锁后重发同参数：目标已过审 → 放行
+        forumService.seedLastReplyAt(loginUid(mgr), 0L);
+        mockMvc.perform(org.springframework.test.web.servlet.request.MockMvcRequestBuilders
+                        .post("/api/forum/posts/" + pid + "/replies").header("Authorization", "Bearer " + mgr)
+                        .contentType(MediaType.APPLICATION_JSON)
+                        .content("{\"content\":\"放行后正常回复\",\"parentId\":" + root1 + ",\"replyToId\":" + pend2 + "}"))
+                .andExpect(jsonPath("$.code").value(0));
+    }
+
+    @Test
     @DisplayName("列表封面 coverUrl：首图口径、无图为 null、全状态列表各见其图")
     void listCoverUrl() throws Exception {
         String stu = login(STU_A);
@@ -279,8 +343,10 @@ class ApiGapM10Test {
         // 发布状态变更会清列表缓存；这里 keyword 查询走 DB 直读路径避免缓存时序
         MvcResult hall = mockMvc.perform(get("/api/items").param("keyword", "封面样本件")).andReturn();
         String h = envelope(hall).path("data").path("list").toString();
-        assertThat(h).contains("first.png");
-        assertThat(h).doesNotContain("second.png");   // 列表只给首图，整图集留给详情
+        // 新契约：coverUrl=首图（列表封面位），images=整集有序（卡片内轮播用）——
+        // 用户要求"每张卡片的封面图可轮播自己那组图，只有一张就不轮"
+        assertThat(h).contains("\"coverUrl\":\"/uploads/demoimg/first.png\"");
+        assertThat(h).contains("\"images\":[\"/uploads/demoimg/first.png\",\"/uploads/demoimg/second.png\"]");
     }
 
     @Test

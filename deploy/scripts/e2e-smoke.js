@@ -3,7 +3,8 @@
  * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
  * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏→
  *       举报工单→两段式上传→编辑重审→治理口→看板→消息→游客视角→
- *       卡片封面按图找物→未审核内容互动闸（收藏/点赞/回复，管理员同闸）
+ *       卡片封面轮播(多图轮/单图静/contain)→未审核内容互动闸（收藏/点赞/
+ *       回复+归一路径 replyToId 闸，管理员同闸）
  */
 const { chromium } = require('playwright');
 const fs = require('fs');
@@ -341,6 +342,9 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const withCover = (hall.data?.list || []).filter(x => x.coverUrl);
     ok('大厅列表带 coverUrl 封面', withCover.length >= 2, 'covers=' + withCover.length);
     ok('封面为站内图片路径', withCover.every(x => /^\/uploads\//.test(x.coverUrl)), JSON.stringify((withCover[0]||{}).coverUrl));
+    const multiImgs = (hall.data?.list || []).filter(x => (x.images || []).length > 1);
+    ok('列表带有序 images 图集且存在多图件(卡片轮播源)', multiImgs.length >= 1, 'multi=' + multiImgs.length);
+    ok('多图件首图=coverUrl(轮播从封面起)', multiImgs.every(x => x.images[0] === x.coverUrl));
     await page.goto(BASE + '/', { waitUntil: 'networkidle' });
     await page.waitForTimeout(1500);
     const coverImgs = await page.locator('.grid .card .cover-img').count();
@@ -350,6 +354,20 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
       return im ? { ok: im.complete && im.naturalWidth > 0, fit: getComputedStyle(im).objectFit } : null;
     });
     ok('封面真实加载且 contain 完整展示', natural && natural.ok && natural.fit === 'contain', JSON.stringify(natural));
+    // 卡片轮播：多图卡内嵌 el-carousel；单图卡是静态 router-link（不轮播）
+    const cardCarousels = await page.locator('.grid .card .cover-carousel').count();
+    ok('多图卡片出现内嵌轮播(>=1)', cardCarousels >= 1, 'carousels=' + cardCarousels);
+    const framesInOne = await page.evaluate(() => {
+      const c = document.querySelector('.grid .card .cover-carousel');
+      return c ? c.querySelectorAll('.el-carousel__item').length : 0;
+    });
+    ok('卡片轮播帧数=该件图集数', framesInOne >= 2, 'frames=' + framesInOne);
+    const singleStatic = await page.evaluate(() => {
+      // 找一张无 cover-carousel 但有 cover-box 的卡 → 单图静态不轮
+      const cards = [...document.querySelectorAll('.grid .card')];
+      return cards.some(c => !c.querySelector('.cover-carousel') && c.querySelector('a.cover-box .cover-img'));
+    });
+    ok('单图卡片为静态图(不轮播)', singleStatic);
 
     // 治理者回复闸：管理员回复他人待审帖 → 拒绝
     const gateNo = '7' + STAMP.slice(-8);
@@ -369,6 +387,28 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
     const freshTok = (await api('/auth/login', { body: { studentNo: freshNo, password: PWD } })).data?.token;
     const okReply = await api(`/forum/posts/${gPid}/replies`, { tok: freshTok, body: { content: '过审后正常回复互动' } });
     ok('过审后回复放行', okReply.code === 0, 'got ' + okReply.code);
+
+    // 归一路径闸（用户实测"在待审评论下回复"真实打法）：一级放行→二级挂其下(待审)→
+    // 对二级点回复：parentId=一级(已发布)+replyToId=二级(待审) → 必须 5008
+    let seq5 = 0; const freshGateTok = async () => {
+      const no = 'b' + STAMP.slice(-7) + (++seq5);
+      await register(no, '归一闸号' + no);
+      return (await api('/auth/login', { body: { studentNo: no, password: PWD } })).data?.token;
+    };
+    const tokL1 = await freshGateTok();
+    const l1 = await api(`/forum/posts/${gPid}/replies`, { tok: tokL1, body: { content: '归一闸一级楼' } });
+    const l1id = l1.data?.id;
+    if (l1id) {
+      const hnd = await api(`/admin/replies/${l1id}/handle`, { tok: adminTok, body: { target: 1 } });
+      ok('归一闸:一级楼放行', hnd.code === 0, 'got ' + hnd.code);
+      const tok4 = await freshGateTok();
+      const l2 = await api(`/forum/posts/${gPid}/replies`, { tok: tok4, body: { content: '归一闸二级待审楼', parentId: l1id } });
+      const l2id = l2.data?.id;
+      ok('归一闸:二级待审楼创建', l2.code === 0 && !!l2id, JSON.stringify(l2).slice(0, 90));
+      const tokB = await freshGateTok();
+      const bypass = await api(`/forum/posts/${gPid}/replies`, { tok: tokB, body: { content: '绕归一抢跑', parentId: l1id, replyToId: l2id } });
+      ok('★对『待审楼』回复(归一 parentId 绕闸)被拒(5008)——实测 bug 回归钉', bypass.code === 5008, 'got ' + bypass.code);
+    }
   }
 
   // ---------- 14. 游客视角（全新无登录上下文）：大厅可逛/详情可读/相似推荐可见/引导条在 ----------

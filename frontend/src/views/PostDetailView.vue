@@ -71,10 +71,11 @@ async function submitReply() {
   if (!replyForm.value.content.trim()) return ElMessage.warning('写点什么吧')
   try {
     const body = { content: replyForm.value.content }
-    // 两级封顶归一：对二级回复点回复 → parentId 传其所在一级楼 id，@ 用 replyToUserId
+    // 两级封顶归一：对二级回复点回复 → parentId 传其所在一级楼 id；
+    // 真实目标楼层经 replyToId 传达，后端校验其已过审（待审楼不可回复闸）
     if (replyForm.value.root) body.parentId = replyForm.value.root.id
-    if (replyForm.value.target && replyForm.value.target.userId !== undefined)
-      body.replyToUserId = replyForm.value.target.userId
+    if (replyForm.value.target && replyForm.value.target.id !== undefined)
+      body.replyToId = replyForm.value.target.id
     await replyPost(post.value.id, body)
     ElMessage.success('已发布，审核通过后展示')
     replyDlg.value = false
@@ -174,8 +175,8 @@ const at = (r) => r.replyToNickname ? `@${r.replyToNickname} ：` : ''
             <el-avatar :size="26" :src="root.avatar || undefined">{{ (root.nickname || '匿')[0] }}</el-avatar>
             <b>{{ root.nickname }}</b>
             <span class="dim">{{ relTime(root.createdAt) }}</span>
-            <span v-if="root.status === 0" class="pend">（待审核）</span>
-            <el-button size="small" link type="primary" @click="openReply(root, root)">回复</el-button>
+            <span v-if="root.status === 0" class="pend">（待审核，通过后才能回复）</span>
+            <el-button v-if="root.status !== 0" size="small" link type="primary" @click="openReply(root, root)">回复</el-button>
             <el-button v-if="isAuthor || root.userId === store.user?.id" size="small" link type="danger" @click="delReply(root)">删除</el-button>
           </div>
           <div class="rbody" v-html="safeHtml(root.content)"></div>
@@ -184,8 +185,8 @@ const at = (r) => r.replyToNickname ? `@${r.replyToNickname} ：` : ''
               <b class="who">{{ child.nickname }}</b>
               <span class="dim">回复 {{ at(child).replace('：', '') }}</span>
               <span class="dim">{{ relTime(child.createdAt) }}</span>
-              <span v-if="child.status === 0" class="pend">（待审核）</span>
-              <el-button size="small" link type="primary" @click="openReply(root, child)">回复</el-button>
+              <span v-if="child.status === 0" class="pend">（待审核，通过后才能回复）</span>
+              <el-button v-if="child.status !== 0" size="small" link type="primary" @click="openReply(root, child)">回复</el-button>
               <el-button v-if="isAuthor || child.userId === store.user?.id" size="small" link type="danger" @click="delReply(child)">删除</el-button>
             </div>
             <div class="rbody" v-html="safeHtml(child.content)"></div>
