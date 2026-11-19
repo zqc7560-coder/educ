@@ -229,11 +229,16 @@ class AnnouncementApiM6Test {
     }
 
     @Test
-    @DisplayName("详情浏览计数自增（读者口唯一计数点）")
+    @DisplayName("详情浏览计数：同访客去重只 +1、换访客再 +1；列表不计数（用户要求）")
     void viewCountOnDetail() throws Exception {
         int before = annMapper.selectById(1L).getViewCount();
-        mockMvc.perform(get("/api/announcements/1")).andExpect(jsonPath("$.code").value(0));
-        mockMvc.perform(get("/api/announcements/1")).andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/api/announcements/1")
+                        .header("X-Real-IP", "10.1.1.1")).andExpect(jsonPath("$.code").value(0));
+        mockMvc.perform(get("/api/announcements/1")
+                        .header("X-Real-IP", "10.1.1.1")).andExpect(jsonPath("$.code").value(0));  // 复访去重
+        assertThat(annMapper.selectById(1L).getViewCount()).isEqualTo(before + 1);
+        mockMvc.perform(get("/api/announcements/1")
+                        .header("X-Real-IP", "10.9.9.9")).andExpect(jsonPath("$.code").value(0));  // 另一访客
         assertThat(annMapper.selectById(1L).getViewCount()).isEqualTo(before + 2);
         // 列表页不计数（口径：浏览=点进详情）
         mockMvc.perform(get("/api/announcements")).andExpect(jsonPath("$.code").value(0));

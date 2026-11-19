@@ -1,9 +1,9 @@
 /**
- * 校园失物招领系统 · 全功能端到端冒烟（真接口+真浏览器混合）
+ * 校园失物招领系统 · 全功能端到端冒烟 101 断言（真接口+真浏览器混合）
  * 用法: node e2e-smoke.js [base]   默认 http://localhost:8088（Docker 演示栈）
  * 覆盖：注册/登录→发布→审核→匹配→认领全流程(6态)→仲裁→论坛→收藏(含
  *       服务端态回读)→举报工单→两段式上传→编辑重审→治理口→看板→消息→
- *       游客视角+登录页游客入口→卡片封面轮播→浏览按访客去重→
+ *       游客视角+登录页游客入口→卡片封面轮播→浏览按访客去重(物品/帖/公告)→
  *       未审核内容互动闸（收藏/点赞/回复+归一 replyToId 闸，管理员同闸）
  * 纪律：同号重登会按"登录水位"踢掉在先令牌——复用 token 的段落禁止中途重登，
  *       需要新身份就注册新号；回复防刷 10s 窗同理，一段一号只发一贴。
@@ -205,9 +205,29 @@ fs.writeFileSync('e2e_bad.exe', Buffer.from('MZ fake'));
 
   // ---------- 8. 公告：管理员发布→首页横幅可见 ----------
   r = await api('/admin/announcements', { tok: adminTok, body: { title: 'E2E公告' + STAMP, content: '失物中心搬迁通知', status: 1, topFlag: 1 } });
-  ok('发布公告', r.code === 0, JSON.stringify(r).slice(0,120));
+  const publishAnnId = r.data?.id;
+  ok('创建公告(新公告一律草稿——编辑与发布分离)', r.code === 0 && !!publishAnnId, JSON.stringify(r).slice(0,120));
+  const pub = await api(`/admin/announcements/${publishAnnId}/status`, { tok: adminTok, method: 'PATCH', body: { target: 1 } });
+  ok('公告显式发布(target=1)', pub.code === 0, JSON.stringify(pub).slice(0,90));
   r = await api('/announcements/active');
   ok('公开横幅可见公告', (r.data || []).some(a => a.title.includes('E2E公告' + STAMP)) || r.code === 0);
+  // 公告详情浏览去重（用户报 bug：点多次算多次）：同访客复访不涨、换访客 +1
+  {
+    // active 横幅只回一条（可能被种子置顶挤掉）——直接用发布公告接口返回的 id
+    const annId = (await api('/announcements/active')).data?.find(a => a.title.includes('E2E公告' + STAMP))?.id
+      ?? publishAnnId;
+    if (annId) {
+      const a1 = await api(`/announcements/${annId}`);
+      const v1 = a1.data?.viewCount;
+      const a2 = await api(`/announcements/${annId}`);   // 同 IP 复访
+      ok('公告详情可读(拿到 id)', !!annId && a1.code === 0, JSON.stringify(a1).slice(0,60));
+      ok('★公告同人复访浏览不涨', a2.data?.viewCount === v1, `${v1}→${a2.data?.viewCount}`);
+      const a3 = await api(`/announcements/${annId}`, { tok: stuTok });  // 登录访客=另一身份
+      ok('公告换访客 +1', a3.data?.viewCount === v1 + 1, `${v1}→${a3.data?.viewCount}`);
+      const a4 = await api(`/announcements/${annId}`, { tok: stuTok });  // 同一登录者复访
+      ok('公告同登录者复访不涨', a4.data?.viewCount === v1 + 1, `${v1}→${a4.data?.viewCount}`);
+    }
+  }
 
   // ---------- 9. 敏感词 & 治理 ----------
   r = await api('/admin/words', { tok: adminTok, body: { word: '违规词' + STAMP } });

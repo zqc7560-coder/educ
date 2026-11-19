@@ -44,10 +44,20 @@ public class AnnouncementController {
         return Result.ok(announcementService.activeBanner());
     }
 
-    /** 详情（浏览计数；非窗口内已发布 404/6001） */
+    /** 详情（浏览计数按访客去重；非窗口内已发布 404/6001） */
     @GetMapping("/api/announcements/{id}")
-    public Result<AnnouncementVO> detail(@PathVariable Long id) {
-        return Result.ok(announcementService.detail(id));
+    public Result<AnnouncementVO> detail(@PathVariable Long id,
+                                         @org.springframework.security.core.annotation.AuthenticationPrincipal
+                                         com.campus.lf.security.LoginUser me,
+                                         jakarta.servlet.http.HttpServletRequest request) {
+        String viewerKey;
+        if (me != null) {
+            viewerKey = "u:" + me.getUserId();
+        } else {
+            String rip = request.getHeader("X-Real-IP");
+            viewerKey = "ip:" + (rip == null || rip.isBlank() ? request.getRemoteAddr() : rip);
+        }
+        return Result.ok(announcementService.detail(id, viewerKey));
     }
 
     // ---------- 管理侧（announce:manage） ----------

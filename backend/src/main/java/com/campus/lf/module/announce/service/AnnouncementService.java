@@ -59,6 +59,7 @@ public class AnnouncementService {
     private final com.campus.lf.module.admin.service.OperationLogService opLog;
     private final AnnouncementImageMapper imgMapper;
     private final SysConfigMapper configMapper;
+    private final com.campus.lf.module.item.service.ViewOnceGate viewOnceGate;
 
     // ==================================================================
     // 管理端（announce:manage）
@@ -197,8 +198,9 @@ public class AnnouncementService {
         return list.stream().map(a -> toVO(a, false)).toList();
     }
 
-    /** 公告详情：非窗口内已发布 → 6001（草稿/下架对读者与不存在同响应，防内部口径泄露） */
-    public AnnouncementVO detail(Long id) {
+    /** 公告详情：非窗口内已发布 → 6001（草稿/下架对读者与不存在同响应，防内部口径泄露）。
+     *  浏览计数按访客去重（用户要求三域一致）：登录 u:{uid}、游客 ip:{X-Real-IP}，24h 同人只 +1 */
+    public AnnouncementVO detail(Long id, String viewerKey) {
         Announcement a = annMapper.selectById(id);
         if (a == null || a.getStatus() != STATUS_PUBLISHED) {
             throw new BizException(BizCode.ANNOUNCEMENT_NOT_FOUND,
@@ -210,9 +212,11 @@ public class AnnouncementService {
             throw new BizException(BizCode.ANNOUNCEMENT_NOT_FOUND,
                     BizCode.ANNOUNCEMENT_NOT_FOUND.getMessage(), 404);
         }
-        annMapper.update(null, new LambdaUpdateWrapper<Announcement>()
-                .eq(Announcement::getId, id).setSql("view_count = view_count + 1"));
-        a.setViewCount(a.getViewCount() + 1);
+        if (viewOnceGate.shouldCount("ann", id, viewerKey)) {
+            annMapper.update(null, new LambdaUpdateWrapper<Announcement>()
+                    .eq(Announcement::getId, id).setSql("view_count = view_count + 1"));
+            a.setViewCount(a.getViewCount() + 1);
+        }
         return toVO(a, true);
     }
 
